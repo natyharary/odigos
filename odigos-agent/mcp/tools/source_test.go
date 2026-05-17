@@ -1,17 +1,14 @@
 package tools
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
 
-	odigosfake "github.com/odigos-io/odigos/api/generated/odigos/clientset/versioned/fake"
 	"github.com/odigos-io/odigos/api/k8sconsts"
 	odigosv1 "github.com/odigos-io/odigos/api/odigos/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
 func TestApprovalCachePutTakeRoundtrip(t *testing.T) {
@@ -98,10 +95,18 @@ func TestClampInt(t *testing.T) {
 }
 
 func TestIsSupportedWorkloadKind(t *testing.T) {
-	supported := []string{"Deployment", "StatefulSet", "DaemonSet", "CronJob", "Job", "Namespace", "DeploymentConfig", "Rollout"}
+	supported := []string{"Deployment", "StatefulSet", "DaemonSet", "CronJob", "Job", "Namespace"}
 	for _, kind := range supported {
 		if !IsSupportedWorkloadKind(kind) {
 			t.Errorf("expected %s to be supported", kind)
+		}
+	}
+	// DeploymentConfig and Rollout require typed clients that the cluster MCP
+	// doesn't yet pull in; keep them out of IsSupportedWorkloadKind so the
+	// propose path doesn't accept kinds fetchPodTemplate can't actually read.
+	for _, kind := range []string{"DeploymentConfig", "Rollout"} {
+		if IsSupportedWorkloadKind(kind) {
+			t.Errorf("%s should not be supported until fetchPodTemplate handles it", kind)
 		}
 	}
 	if IsSupportedWorkloadKind("Pod") {
@@ -182,14 +187,7 @@ func TestFindWorkloadSourceMatchByWorkloadSpec(t *testing.T) {
 			},
 		},
 	}
-	manager := &sourceManager{clients: &Clients{
-		Core:   kubefake.NewSimpleClientset(),
-		Odigos: odigosfake.NewSimpleClientset(source),
-	}}
-	got, err := manager.findWorkloadSource(context.Background(), "default", "Deployment", "payments")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	got := matchWorkloadSource([]odigosv1.Source{*source}, "Deployment", "payments")
 	if got == nil || got.Name != "src-abc" {
 		t.Fatalf("expected to find src-abc, got %+v", got)
 	}
@@ -207,24 +205,12 @@ func TestFindWorkloadSourceMatchesRegexPattern(t *testing.T) {
 			MatchWorkloadNameAsRegex: true,
 		},
 	}
-	manager := &sourceManager{clients: &Clients{
-		Core:   kubefake.NewSimpleClientset(),
-		Odigos: odigosfake.NewSimpleClientset(source),
-	}}
+	items := []odigosv1.Source{*source}
 
-	got, err := manager.findWorkloadSource(context.Background(), "default", "Deployment", "payments")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got == nil || got.Name != "src-regex" {
+	if got := matchWorkloadSource(items, "Deployment", "payments"); got == nil || got.Name != "src-regex" {
 		t.Fatalf("expected to match pay.* against payments, got %+v", got)
 	}
-
-	got, err = manager.findWorkloadSource(context.Background(), "default", "Deployment", "checkout")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != nil {
+	if got := matchWorkloadSource(items, "Deployment", "checkout"); got != nil {
 		t.Errorf("pay.* must not match checkout, got %+v", got)
 	}
 }
@@ -241,15 +227,7 @@ func TestFindWorkloadSourceSkipsInvalidRegex(t *testing.T) {
 			MatchWorkloadNameAsRegex: true,
 		},
 	}
-	manager := &sourceManager{clients: &Clients{
-		Core:   kubefake.NewSimpleClientset(),
-		Odigos: odigosfake.NewSimpleClientset(source),
-	}}
-	got, err := manager.findWorkloadSource(context.Background(), "default", "Deployment", "anything")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != nil {
+	if got := matchWorkloadSource([]odigosv1.Source{*source}, "Deployment", "anything"); got != nil {
 		t.Errorf("invalid regex must not match, got %+v", got)
 	}
 }
@@ -265,15 +243,7 @@ func TestFindWorkloadSourceReturnsNilOnNoMatch(t *testing.T) {
 			},
 		},
 	}
-	manager := &sourceManager{clients: &Clients{
-		Core:   kubefake.NewSimpleClientset(),
-		Odigos: odigosfake.NewSimpleClientset(source),
-	}}
-	got, err := manager.findWorkloadSource(context.Background(), "default", "Deployment", "payments")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != nil {
+	if got := matchWorkloadSource([]odigosv1.Source{*source}, "Deployment", "payments"); got != nil {
 		t.Errorf("expected nil, got %+v", got)
 	}
 }
@@ -289,15 +259,7 @@ func TestFindNamespaceSource(t *testing.T) {
 			},
 		},
 	}
-	manager := &sourceManager{clients: &Clients{
-		Core:   kubefake.NewSimpleClientset(),
-		Odigos: odigosfake.NewSimpleClientset(source),
-	}}
-	got, err := manager.findNamespaceSource(context.Background(), "default")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got == nil || got.Name != "ns-src" {
+	if got := matchNamespaceSource([]odigosv1.Source{*source}, "default"); got == nil || got.Name != "ns-src" {
 		t.Fatalf("expected ns-src, got %+v", got)
 	}
 }

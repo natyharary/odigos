@@ -133,17 +133,13 @@ func (m *sourceManager) getSource(ctx context.Context, request mcp.CallToolReque
 		return ToolError("name required: %v", err)
 	}
 
-	workloadSource, err := m.findWorkloadSource(ctx, namespace, kind, name)
+	list, err := m.clients.Odigos.OdigosV1alpha1().Sources(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return ToolError("list sources in %s: %v", namespace, err)
 	}
-	namespaceSource, err := m.findNamespaceSource(ctx, namespace)
-	if err != nil {
-		return ToolError("list namespace-scope sources in %s: %v", namespace, err)
-	}
 	return WriteJSON(map[string]any{
-		"workload":  workloadSource,
-		"namespace": namespaceSource,
+		"workload":  matchWorkloadSource(list.Items, kind, name),
+		"namespace": matchNamespaceSource(list.Items, namespace),
 	})
 }
 
@@ -459,11 +455,11 @@ func (m *sourceManager) proposeCreateSource(ctx context.Context, request mcp.Cal
 		}
 	}
 
-	existing, err := m.findWorkloadSource(ctx, namespace, kind, name)
+	list, err := m.clients.Odigos.OdigosV1alpha1().Sources(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return ToolError("look up existing Source: %v", err)
 	}
-	if existing != nil {
+	if existing := matchWorkloadSource(list.Items, kind, name); existing != nil {
 		return ToolError("Source already exists for %s/%s/%s (name=%s) - nothing to create", namespace, kind, name, existing.GetName())
 	}
 
@@ -525,11 +521,11 @@ func (m *sourceManager) applyCreateSource(ctx context.Context, request mcp.CallT
 		return ToolError("request_id %s is for operation %q, not create_source", requestID, pending.Operation)
 	}
 
-	existing, err := m.findWorkloadSource(ctx, pending.Namespace, pending.WorkloadKind, pending.WorkloadName)
+	list, err := m.clients.Odigos.OdigosV1alpha1().Sources(pending.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return ToolError("recheck existing Source: %v", err)
 	}
-	if existing != nil {
+	if existing := matchWorkloadSource(list.Items, pending.WorkloadKind, pending.WorkloadName); existing != nil {
 		log.Printf("audit: op=apply_create_source request_id=%s result=skipped reason=already_exists name=%s",
 			requestID, existing.GetName())
 		return ToolError("Source %s already exists for %s/%s/%s - skipping apply",
@@ -564,7 +560,9 @@ func (m *sourceManager) applyCreateSource(ctx context.Context, request mcp.CallT
 // ---- helpers ----
 
 // IsSupportedWorkloadKind reports whether the agent's create_source mutation
-// is willing to touch this workload kind. Matches frontend's EnsureSourceCRD.
+// is willing to touch this workload kind. Kept in sync with fetchPodTemplate -
+// any kind accepted here must be readable there. DeploymentConfig and
+// ArgoRollout would need additional typed clients before they can be added.
 func IsSupportedWorkloadKind(kind string) bool {
 	switch k8sconsts.WorkloadKind(kind) {
 	case k8sconsts.WorkloadKindDeployment,
@@ -572,17 +570,14 @@ func IsSupportedWorkloadKind(kind string) bool {
 		k8sconsts.WorkloadKindDaemonSet,
 		k8sconsts.WorkloadKindCronJob,
 		k8sconsts.WorkloadKindJob,
-		k8sconsts.WorkloadKindNamespace,
-		k8sconsts.WorkloadKindDeploymentConfig,
-		k8sconsts.WorkloadKindArgoRollout:
+		k8sconsts.WorkloadKindNamespace:
 		return true
 	}
 	return false
 }
 
 // buildSourceForWorkload constructs the canonical Source CR for a workload.
-// Matches frontend/services/sources.go:EnsureSourceCRD: GenerateName "source-"
-// plus Spec.Workload. Labels are filled in by the odigos webhook.
+// Labels are filled in by the odigos webhook on admission.
 func buildSourceForWorkload(namespace, kind, name string) *odigosv1.Source {
 	return &odigosv1.Source{
 		ObjectMeta: metav1.ObjectMeta{
@@ -599,47 +594,37 @@ func buildSourceForWorkload(namespace, kind, name string) *odigosv1.Source {
 	}
 }
 
-// findWorkloadSource returns the workload-scope Source for the given target,
-// or nil if none exists. Robust against missing labels: lists all Sources in
-// the namespace and matches by Spec.Workload (literal or regex).
-func (m *sourceManager) findWorkloadSource(ctx context.Context, namespace, kind, name string) (*odigosv1.Source, error) {
-	list, err := m.clients.Odigos.OdigosV1alpha1().Sources(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	for index := range list.Items {
-		source := &list.Items[index]
+// matchWorkloadSource returns the workload-scope Source for the given target,
+// or nil if none exists. Matches by Spec.Workload (literal or regex) so it
+// works even when Sources are missing the workload-name/kind labels.
+func matchWorkloadSource(items []odigosv1.Source, kind, name string) *odigosv1.Source {
+	for index := range items {
+		source := &items[index]
 		if string(source.Spec.Workload.Kind) != kind {
 			continue
 		}
 		if source.Spec.MatchWorkloadNameAsRegex {
 			pattern, regexpErr := regexp.Compile(source.Spec.Workload.Name)
 			if regexpErr == nil && pattern.MatchString(name) {
-				return source, nil
+				return source
 			}
 			continue
 		}
 		if source.Spec.Workload.Name == name {
-			return source, nil
+			return source
 		}
 	}
-	return nil, nil
+	return nil
 }
 
-// findNamespaceSource returns the namespace-scope Source for the given
-// namespace, or nil if none exists.
-func (m *sourceManager) findNamespaceSource(ctx context.Context, namespace string) (*odigosv1.Source, error) {
-	list, err := m.clients.Odigos.OdigosV1alpha1().Sources(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	for index := range list.Items {
-		source := &list.Items[index]
+func matchNamespaceSource(items []odigosv1.Source, namespace string) *odigosv1.Source {
+	for index := range items {
+		source := &items[index]
 		if source.Spec.Workload.Kind == k8sconsts.WorkloadKindNamespace && source.Spec.Workload.Name == namespace {
-			return source, nil
+			return source
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 // fetchPodTemplate returns the pod template, label selector string, and owner
@@ -655,49 +640,38 @@ func (m *sourceManager) fetchPodTemplate(ctx context.Context, namespace, kind, n
 		if err != nil {
 			return nil, "", nil, err
 		}
-		return &deployment.Spec.Template, labelSelectorString(deployment.Spec.Selector), deployment.OwnerReferences, nil
+		return &deployment.Spec.Template, metav1.FormatLabelSelector(deployment.Spec.Selector), deployment.OwnerReferences, nil
 	case k8sconsts.WorkloadKindStatefulSet:
 		statefulSet, err := apps.StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, "", nil, err
 		}
-		return &statefulSet.Spec.Template, labelSelectorString(statefulSet.Spec.Selector), statefulSet.OwnerReferences, nil
+		return &statefulSet.Spec.Template, metav1.FormatLabelSelector(statefulSet.Spec.Selector), statefulSet.OwnerReferences, nil
 	case k8sconsts.WorkloadKindDaemonSet:
 		daemonSet, err := apps.DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, "", nil, err
 		}
-		return &daemonSet.Spec.Template, labelSelectorString(daemonSet.Spec.Selector), daemonSet.OwnerReferences, nil
+		return &daemonSet.Spec.Template, metav1.FormatLabelSelector(daemonSet.Spec.Selector), daemonSet.OwnerReferences, nil
 	case k8sconsts.WorkloadKindCronJob:
 		cronJob, err := batch.CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, "", nil, err
 		}
 		template := cronJob.Spec.JobTemplate.Spec.Template
-		return &template, labelSelectorString(cronJob.Spec.JobTemplate.Spec.Selector), cronJob.OwnerReferences, nil
+		return &template, metav1.FormatLabelSelector(cronJob.Spec.JobTemplate.Spec.Selector), cronJob.OwnerReferences, nil
 	case k8sconsts.WorkloadKindJob:
 		job, err := batch.Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, "", nil, err
 		}
-		return &job.Spec.Template, labelSelectorString(job.Spec.Selector), job.OwnerReferences, nil
+		return &job.Spec.Template, metav1.FormatLabelSelector(job.Spec.Selector), job.OwnerReferences, nil
 	}
 	return nil, "", nil, errWorkloadKindUnsupported(kind)
 }
 
 func errWorkloadKindUnsupported(kind string) error {
 	return fmt.Errorf("workload kind %q not supported for pod-template lookup (supports Deployment, StatefulSet, DaemonSet, CronJob, Job)", kind)
-}
-
-func labelSelectorString(selector *metav1.LabelSelector) string {
-	if selector == nil {
-		return ""
-	}
-	parts := make([]string, 0, len(selector.MatchLabels))
-	for key, value := range selector.MatchLabels {
-		parts = append(parts, fmt.Sprintf("%s=%s", key, value))
-	}
-	return strings.Join(parts, ",")
 }
 
 func summarizeContainers(containers []corev1.Container) []map[string]any {

@@ -7,23 +7,19 @@ package tools
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	odigosclient "github.com/odigos-io/odigos/api/generated/odigos/clientset/versioned"
+	"github.com/odigos-io/odigos/k8sutils/pkg/client"
+	"github.com/odigos-io/odigos/k8sutils/pkg/env"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
-const (
-	defaultOdigosNamespace = "odigos-system"
-	defaultApprovalTTL     = 5 * time.Minute
-)
+const defaultApprovalTTL = 5 * time.Minute
 
 // Clients bundles every kube client the MCP tools need.
 type Clients struct {
@@ -52,26 +48,11 @@ func BuildClients() (*Clients, error) {
 }
 
 func buildRESTConfig() (*rest.Config, error) {
-	if config, err := rest.InClusterConfig(); err == nil {
-		return config, nil
-	}
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		home, _ := os.UserHomeDir()
-		kubeconfig = filepath.Join(home, ".kube", "config")
-	}
-	return clientcmd.BuildConfigFromFlags("", kubeconfig)
+	return client.GetClientConfigWithContext(env.GetDefaultKubeConfigPath(), "")
 }
 
 // OdigosNamespace returns the namespace odigos system components run in.
-// Reads CURRENT_NS (matching common/consts.CurrentNamespaceEnvVar) and falls
-// back to "odigos-system" so local dev with kubeconfig works out of the box.
-func OdigosNamespace() string {
-	if namespace := os.Getenv("CURRENT_NS"); namespace != "" {
-		return namespace
-	}
-	return defaultOdigosNamespace
-}
+func OdigosNamespace() string { return env.GetCurrentNamespace() }
 
 // PendingMutation captures the dry-run state of a proposed mutation, awaiting
 // user approval via apply_*. Fields are deliberately concrete - the agent
