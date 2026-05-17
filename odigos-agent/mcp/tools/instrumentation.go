@@ -32,6 +32,13 @@ const obiUniversalDistroName = "opentelemetry-ebpf-instrumentation"
 // to recognise in `kubectl get` and rollback hints.
 const instrumentationRuleNamePrefix = "odigos-agent-"
 
+// managedByLabelKey / managedByLabelValue tag every rule the agent creates so
+// the rollback `kubectl delete -l ...` hint actually matches them. Patched
+// pre-existing rules are not relabelled - that would silently broaden the
+// rollback hint to delete user-authored rules.
+const managedByLabelKey = "app.kubernetes.io/managed-by"
+const managedByLabelValue = "odigos-agent"
+
 // RegisterInstrumentationTools wires the distro / OBI override MCP tools.
 // Loads the embedded distro registry at startup; the YAMLs are baked into the
 // binary so the only failure mode is a programmer error in the distros package.
@@ -108,7 +115,7 @@ func (m *instrumentationManager) register(server *mcpserver.MCPServer) {
 
 	server.AddTool(mcp.NewTool(
 		"propose_disable_obi",
-		mcp.WithDescription("Server-side dry-run patch (or delete) of the InstrumentationRule managing this workload, removing the eBPF distro so odigos falls back to the language SDK default. Returns request_id + before/after YAML + diff. Caller must invoke apply_disable_obi after a user approves."),
+		mcp.WithDescription("Server-side dry-run patch of the InstrumentationRule managing this workload, rewriting OtelDistroNames to the language's default SDK distro so the workload falls back from eBPF/OBI to the SDK. Returns request_id + before/after YAML + diff. Caller must invoke apply_disable_obi after a user approves."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Workload namespace.")),
 		mcp.WithString("kind", mcp.Required(), mcp.Description("Workload kind.")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Workload name.")),
@@ -170,7 +177,7 @@ func (m *instrumentationManager) getWorkloadDistro(ctx context.Context, request 
 	for _, runtimeDetails := range config.Status.RuntimeDetailsByContainer {
 		language := runtimeDetails.Language
 		languages[string(language)] = struct{}{}
-		distroName, source := resolveDistroForContainer(config, rules, defaults, runtimeDetails.ContainerName, language)
+		distroName, source := resolveDistroForContainer(config, rules, defaults, runtimeDetails.ContainerName, language, m.distroLanguage)
 		containers = append(containers, map[string]any{
 			"container":   runtimeDetails.ContainerName,
 			"language":    string(language),
@@ -224,9 +231,9 @@ func (m *instrumentationManager) checkObiEligibility(ctx context.Context, reques
 	for _, language := range languages {
 		ebpfDistro := m.ebpfDistroForLanguage(language)
 		entry := map[string]any{
-			"language":           string(language),
-			"ebpf_distro":        ebpfDistro,
-			"eligible":           ebpfDistro != "",
+			"language":    string(language),
+			"ebpf_distro": ebpfDistro,
+			"eligible":    ebpfDistro != "",
 		}
 		if ebpfDistro == "" {
 			entry["reason"] = "no_ebpf_distro_for_language"
@@ -260,20 +267,7 @@ func (m *instrumentationManager) proposeOverrideDistro(ctx context.Context, requ
 	if err != nil {
 		return ToolError("distro_name required: %v", err)
 	}
-
-	plan, planErr := m.planDistroChange(ctx, namespace, kind, name, "override_distro", func(language common.ProgrammingLanguage, current string) (string, error) {
-		target := m.distros.GetDistroByName(targetDistroName)
-		if target == nil {
-			return "", fmt.Errorf("distro %q not found in registry", targetDistroName)
-		}
-		if target.Language != language && target.Language != common.ProgrammingLanguageWildcard {
-			return "", fmt.Errorf("distro %q is for language %q, workload language is %q", targetDistroName, target.Language, language)
-		}
-		if current == targetDistroName {
-			return "", fmt.Errorf("workload already uses distro %q for language %q - nothing to override", targetDistroName, language)
-		}
-		return targetDistroName, nil
-	})
+	plan, planErr := m.planDistroChange(ctx, namespace, kind, name, "override_distro", m.makePicker("override_distro", targetDistroName))
 	if planErr != nil {
 		return ToolError("propose_override_distro %s/%s/%s: %v", namespace, kind, name, planErr)
 	}
@@ -285,16 +279,7 @@ func (m *instrumentationManager) proposeEnableObi(ctx context.Context, request m
 	if !ok {
 		return errResult, nil
 	}
-	plan, planErr := m.planDistroChange(ctx, namespace, kind, name, "enable_obi", func(language common.ProgrammingLanguage, current string) (string, error) {
-		target := m.ebpfDistroForLanguage(language)
-		if target == "" {
-			return "", fmt.Errorf("no eBPF distro available for language %q", language)
-		}
-		if current == target {
-			return "", fmt.Errorf("workload already uses eBPF distro %q for language %q", target, language)
-		}
-		return target, nil
-	})
+	plan, planErr := m.planDistroChange(ctx, namespace, kind, name, "enable_obi", m.makePicker("enable_obi", ""))
 	if planErr != nil {
 		return ToolError("propose_enable_obi %s/%s/%s: %v", namespace, kind, name, planErr)
 	}
@@ -306,21 +291,68 @@ func (m *instrumentationManager) proposeDisableObi(ctx context.Context, request 
 	if !ok {
 		return errResult, nil
 	}
-	plan, planErr := m.planDistroChange(ctx, namespace, kind, name, "disable_obi", func(language common.ProgrammingLanguage, current string) (string, error) {
-		if !m.isEbpfDistro(current) {
-			return "", fmt.Errorf("workload's current distro %q for language %q is not eBPF - nothing to disable", current, language)
-		}
-		defaults := m.defaulter.GetDefaultDistroNames()
-		fallback, hasDefault := defaults[language]
-		if !hasDefault {
-			return "", fmt.Errorf("no default SDK distro registered for language %q", language)
-		}
-		return fallback, nil
-	})
+	plan, planErr := m.planDistroChange(ctx, namespace, kind, name, "disable_obi", m.makePicker("disable_obi", ""))
 	if planErr != nil {
 		return ToolError("propose_disable_obi %s/%s/%s: %v", namespace, kind, name, planErr)
 	}
 	return m.cacheAndRespond(plan, "propose_disable_obi")
+}
+
+// makePicker returns the op-specific function that derives the target distro
+// from the current state. The picker is parameterized only on the op and (for
+// override_distro) the user-requested target name; for the OBI ops the target
+// derives from the workload's detected language at picker invocation time.
+//
+// Both propose and apply run the picker against fresh live state. That means
+// apply re-validates the same invariants (target distro still in registry +
+// matches the language, current still differs from target, current is still
+// eBPF for disable_obi) using whatever the cluster looks like at apply time,
+// not the cached dry-run snapshot. A user editing the rule between propose
+// and apply surfaces as a "nothing to override" / "not eBPF - nothing to
+// disable" error rather than a silent corrective rewrite.
+func (m *instrumentationManager) makePicker(op, targetDistroName string) func(language common.ProgrammingLanguage, current string) (string, error) {
+	switch op {
+	case "override_distro":
+		return func(language common.ProgrammingLanguage, current string) (string, error) {
+			target := m.distros.GetDistroByName(targetDistroName)
+			if target == nil {
+				return "", fmt.Errorf("distro %q not found in registry", targetDistroName)
+			}
+			if target.Language != language && target.Language != common.ProgrammingLanguageWildcard {
+				return "", fmt.Errorf("distro %q is for language %q, workload language is %q", targetDistroName, target.Language, language)
+			}
+			if current == targetDistroName {
+				return "", fmt.Errorf("workload already uses distro %q for language %q - nothing to override", targetDistroName, language)
+			}
+			return targetDistroName, nil
+		}
+	case "enable_obi":
+		return func(language common.ProgrammingLanguage, current string) (string, error) {
+			target := m.ebpfDistroForLanguage(language)
+			if target == "" {
+				return "", fmt.Errorf("no eBPF distro available for language %q", language)
+			}
+			if current == target {
+				return "", fmt.Errorf("workload already uses eBPF distro %q for language %q", target, language)
+			}
+			return target, nil
+		}
+	case "disable_obi":
+		return func(language common.ProgrammingLanguage, current string) (string, error) {
+			if !m.isEbpfDistro(current) {
+				return "", fmt.Errorf("workload's current distro %q for language %q is not eBPF - nothing to disable", current, language)
+			}
+			defaults := m.defaulter.GetDefaultDistroNames()
+			fallback, hasDefault := defaults[language]
+			if !hasDefault {
+				return "", fmt.Errorf("no default SDK distro registered for language %q", language)
+			}
+			return fallback, nil
+		}
+	}
+	return func(_ common.ProgrammingLanguage, _ string) (string, error) {
+		return "", fmt.Errorf("unknown op: %s", op)
+	}
 }
 
 func (m *instrumentationManager) applyOverrideDistro(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -395,7 +427,7 @@ func (m *instrumentationManager) planDistroChange(
 	if err != nil {
 		return nil, fmt.Errorf("list InstrumentationRules: %v", err)
 	}
-	currentDistro, _ := resolveLanguageDistro(config, existingRules, m.defaulter.GetDefaultDistroNames(), language)
+	currentDistro, _ := resolveLanguageDistro(config, existingRules, m.defaulter.GetDefaultDistroNames(), language, m.distroLanguage)
 
 	targetDistro, err := pickDistro(language, currentDistro)
 	if err != nil {
@@ -528,22 +560,20 @@ func (m *instrumentationManager) applyDistroChange(ctx context.Context, request 
 }
 
 func (m *instrumentationManager) replanForApply(ctx context.Context, pending *PendingMutation, expectedOp string) (*rulePlan, error) {
-	picker := func(language common.ProgrammingLanguage, current string) (string, error) {
-		// Re-derive `to` from the cached context to stay consistent with the dry-run.
-		toAny, ok := pending.Context["to_distro"]
-		if !ok {
-			return "", fmt.Errorf("cached context missing to_distro field")
+	// Reuse the same picker the propose handler ran, so apply re-checks every
+	// op-specific invariant against fresh live state. For override_distro the
+	// target distro name is restored from the cached context; the other ops
+	// re-derive their target from the language picker uses internally.
+	targetName := ""
+	if expectedOp == "override_distro" {
+		if value, ok := pending.Context["to_distro"].(string); ok {
+			targetName = value
 		}
-		to, ok := toAny.(string)
-		if !ok {
-			return "", fmt.Errorf("cached to_distro field is not a string")
+		if targetName == "" {
+			return nil, fmt.Errorf("cached context is missing a non-empty to_distro for override_distro")
 		}
-		if to == "" && expectedOp != "disable_obi" {
-			return "", fmt.Errorf("cached to_distro is empty")
-		}
-		return to, nil
 	}
-	return m.planDistroChange(ctx, pending.Namespace, pending.WorkloadKind, pending.WorkloadName, expectedOp, picker)
+	return m.planDistroChange(ctx, pending.Namespace, pending.WorkloadKind, pending.WorkloadName, expectedOp, m.makePicker(expectedOp, targetName))
 }
 
 func (m *instrumentationManager) executePlan(ctx context.Context, plan *rulePlan) (map[string]any, error) {
@@ -643,23 +673,44 @@ func ruleTargetsWorkload(rule *odigosv1.InstrumentationRule, namespace, kind, na
 	return false
 }
 
-// pickManagedRule returns the workload-scoped rule we created (or nil) so we
-// patch our own rule rather than touching one the user authored.
+// pickManagedRule returns the rule the agent should patch when applying a
+// distro change, or nil if a fresh rule must be created.
+//
+// "Managed" here means: scoped to exactly this workload (single-entry
+// Workloads list) AND already pinning OtelDistros - i.e. a rule whose entire
+// purpose is to pin a distro for this workload. We patch such rules in place
+// (the user explicitly approves the before/after diff) so we never end up
+// with two competing rules pinning different distros for the same workload.
+//
+// Rules with broader scope (Workloads is nil or covers multiple workloads),
+// or workload-scoped rules with no OtelDistros set (carrying other features
+// like PayloadCollection), are left untouched. In those cases the agent
+// creates a new workload-scoped rule of its own.
+//
+// If multiple candidates match, agent-prefixed rules win to keep apply
+// idempotent across repeated runs.
 func pickManagedRule(rules []odigosv1.InstrumentationRule, namespace, kind, name string) *odigosv1.InstrumentationRule {
+	var fallback *odigosv1.InstrumentationRule
 	for index := range rules {
 		rule := &rules[index]
-		if !strings.HasPrefix(rule.Name, instrumentationRuleNamePrefix) {
-			continue
-		}
 		if rule.Spec.Workloads == nil || len(*rule.Spec.Workloads) != 1 {
 			continue
 		}
 		target := (*rule.Spec.Workloads)[0]
-		if string(target.Kind) == kind && target.Name == name && target.Namespace == namespace {
+		if string(target.Kind) != kind || target.Name != name || target.Namespace != namespace {
+			continue
+		}
+		if rule.Spec.OtelDistros == nil {
+			continue
+		}
+		if strings.HasPrefix(rule.Name, instrumentationRuleNamePrefix) {
 			return rule
 		}
+		if fallback == nil {
+			fallback = rule
+		}
 	}
-	return nil
+	return fallback
 }
 
 // buildDesiredRule returns the rule we want post-mutation. All three ops pin
@@ -689,6 +740,9 @@ func buildDesiredRule(existing *odigosv1.InstrumentationRule, namespace, kind, n
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: instrumentationRuleNamePrefix,
 			Namespace:    namespace,
+			Labels: map[string]string{
+				managedByLabelKey: managedByLabelValue,
+			},
 		},
 		Spec: odigosv1.InstrumentationRuleSpec{
 			RuleName:  fmt.Sprintf("agent-managed %s for %s/%s", op, kind, name),
@@ -703,12 +757,11 @@ func buildDesiredRule(existing *odigosv1.InstrumentationRule, namespace, kind, n
 
 func rollbackHintFor(plan *rulePlan) string {
 	if plan.ExistingRule == nil {
-		return fmt.Sprintf("kubectl delete instrumentationrule -n %s -l %s=%s (the agent will name it with prefix %q)",
-			plan.Namespace,
-			"app.kubernetes.io/managed-by", "odigos-agent",
-			instrumentationRuleNamePrefix)
+		return fmt.Sprintf(
+			"kubectl delete instrumentationrule -n %s -l %s=%s --field-selector=metadata.namespace=%s",
+			plan.Namespace, managedByLabelKey, managedByLabelValue, plan.Namespace)
 	}
-	return fmt.Sprintf("kubectl apply -n %s -f - <<EOF\n%sEOF",
+	return fmt.Sprintf("kubectl apply -n %s -f - <<'EOF'\n%sEOF",
 		plan.Namespace, plan.YAMLBefore)
 }
 
@@ -729,12 +782,26 @@ func contextFor(plan *rulePlan) map[string]any {
 	return context
 }
 
+// resolveDistroForContainer reports which distro is active for a container,
+// and where the choice came from. The lookup follows odigos's own priority:
+//
+//  1. Container-level override on the InstrumentationConfig spec.
+//  2. The first matching InstrumentationRule whose OtelDistroNames contain
+//     a distro registered for this language (or a wildcard distro).
+//  3. The language default from the community defaulter.
+//
+// "Matches this language" means the distro entry's Language field is either
+// equal to the container's detected language or the wildcard ("*"). A rule
+// pinning [java-community] for a Go workload is ignored at this step
+// (the instrumentor would not apply it either) so the agent does not report
+// an obviously cross-language pin as "current distro".
 func resolveDistroForContainer(
 	config *odigosv1.InstrumentationConfig,
 	rules []odigosv1.InstrumentationRule,
 	defaults map[common.ProgrammingLanguage]string,
 	containerName string,
 	language common.ProgrammingLanguage,
+	distroLanguageOf func(string) common.ProgrammingLanguage,
 ) (string, string) {
 	for _, override := range config.Spec.ContainersOverrides {
 		if override.ContainerName != containerName {
@@ -749,13 +816,10 @@ func resolveDistroForContainer(
 			continue
 		}
 		for _, name := range rule.Spec.OtelDistros.OtelDistroNames {
-			// Rules don't pin a language per name - we match by language via
-			// the same defaulter logic the instrumentor uses. For phase 7 we
-			// accept the first matching name as long as the rule scopes us in.
-			_ = name
-		}
-		if len(rule.Spec.OtelDistros.OtelDistroNames) > 0 {
-			return rule.Spec.OtelDistros.OtelDistroNames[0], fmt.Sprintf("rule:%s", rule.Name)
+			distroLanguage := distroLanguageOf(name)
+			if distroLanguage == language || distroLanguage == common.ProgrammingLanguageWildcard {
+				return name, fmt.Sprintf("rule:%s", rule.Name)
+			}
 		}
 	}
 	if defaultName, ok := defaults[language]; ok {
@@ -764,18 +828,27 @@ func resolveDistroForContainer(
 	return "", "unknown"
 }
 
+func (m *instrumentationManager) distroLanguage(name string) common.ProgrammingLanguage {
+	d := m.distros.GetDistroByName(name)
+	if d == nil {
+		return ""
+	}
+	return d.Language
+}
+
 func resolveLanguageDistro(
 	config *odigosv1.InstrumentationConfig,
 	rules []odigosv1.InstrumentationRule,
 	defaults map[common.ProgrammingLanguage]string,
 	language common.ProgrammingLanguage,
+	distroLanguageOf func(string) common.ProgrammingLanguage,
 ) (string, string) {
 	// Pick the first container matching the language.
 	for _, runtimeDetails := range config.Status.RuntimeDetailsByContainer {
 		if runtimeDetails.Language != language {
 			continue
 		}
-		return resolveDistroForContainer(config, rules, defaults, runtimeDetails.ContainerName, language)
+		return resolveDistroForContainer(config, rules, defaults, runtimeDetails.ContainerName, language, distroLanguageOf)
 	}
 	if defaultName, ok := defaults[language]; ok {
 		return defaultName, "default"

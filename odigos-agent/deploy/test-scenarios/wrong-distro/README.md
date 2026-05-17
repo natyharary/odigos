@@ -42,10 +42,13 @@ odigos-agent-test/demo-java` after `apply.sh`, then verify:
 
 1. **Approve actually patches the rule.**
    - Click Approve. The agent calls `apply_override_distro`.
-   - Expect either the user's rule to be patched in-place to
-     `otelDistroNames: [java-community]`, OR a new
-     `odigos-agent-...` workload-scoped rule with that distro to appear
-     (depending on which rule the agent picks as its "managed" target).
+   - Expect the user's `misconfigured-java-ebpf` rule to be patched
+     in-place: `spec.otelDistros.otelDistroNames` switches from
+     `[opentelemetry-ebpf-instrumentation]` to `[java-community]`. The
+     agent does NOT create a new rule when an existing workload-scoped
+     rule already pins `OtelDistros` for this workload - it patches it
+     directly so the cluster never has two competing rules for the same
+     workload (see `pickManagedRule` in `mcp/tools/instrumentation.go`).
    - Report card shows `proposed_remediation.status: approved_applied`.
    - Cleanup: `./cleanup.sh`.
 
