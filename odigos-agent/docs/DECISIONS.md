@@ -175,6 +175,6 @@ lands.
 
 **Context.** PLAN.md Phase 4 lists `pods/exec` `create` in the ClusterRole, citing collector metrics scrape and destination probe. ADR-009 already moved metrics scrape to direct in-cluster HTTP (no exec). The destination probe (`mcp/tools/destination.go::probeTCPAndTLS`) uses `net.Dial` from the MCP container itself - also no exec.
 
-**Decision.** The shipped ClusterRole has NO `pods/exec`. The only mutation verb is `create` on `odigos.io/sources`, exactly mirroring the v1 mutation surface (Phase 1a `apply_create_source`). All other verbs are `get`/`list`/`watch`.
+**Decision.** The shipped ClusterRole has NO `pods/exec`. The only mutation verb is `create` on `odigos.io/sources`, exactly mirroring the v1 mutation surface (Phase 1a `apply_create_source`). All other verbs are `get`/`list` (no `watch` either - no MCP tool builds informers, every read is one-shot per agent call).
 
 **Consequences.** Strictly narrower than PLAN's draft - smaller blast radius if the agent is ever compromised. If a future tool genuinely needs exec (e.g. an interactive debug session), it lands together with an RBAC widening + its own ADR; we don't pre-grant. PLAN.md was not edited in this phase; the divergence is captured here.
