@@ -13,7 +13,7 @@ rules:
       - collectorsgroups
       - processors
       - actions
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list"]
 
   - apiGroups: ["odigos.io"]
     resources: ["sources"]
@@ -23,9 +23,7 @@ rules:
     resources:
       - pods
       - configmaps
-      - services
       - namespaces
-      - nodes
     verbs: ["get", "list"]
 
   - apiGroups: [""]

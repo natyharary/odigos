@@ -25,6 +25,9 @@ spec:
         - name: agent
           image: odigos-ai-agent-agent
           imagePullPolicy: IfNotPresent
+          # Image entrypoint `odigos-agent` is the one-shot CLI - the HTTP
+          # server is a separate console script.
+          command: ["odigos-agent-serve"]
           ports:
             - name: http
               containerPort: 8765
@@ -81,6 +84,13 @@ spec:
           env:
             - name: MCP_CLUSTER_LISTEN_ADDR
               value: "127.0.0.1:9090"
+            # Mirrors helm chart: downward-API CURRENT_NS so
+            # mcp/tools/common.go::OdigosNamespace() resolves to the actual
+            # install namespace.
+            - name: CURRENT_NS
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: ODIGOS_PINNED_COMMIT
               valueFrom:
                 configMapKeyRef:

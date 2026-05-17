@@ -5,7 +5,8 @@ metadata:
   labels:
     {{- include "odigos-ai-agent.labels" . | nindent 4 }}
 rules:
-  # Odigos CRDs - read-only for diagnosis.
+  # Odigos CRDs - read-only for diagnosis. No `watch` because no MCP tool
+  # builds informers; reads are one-shot Get/List per agent call.
   - apiGroups: ["odigos.io"]
     resources:
       - sources
@@ -16,7 +17,7 @@ rules:
       - collectorsgroups
       - processors
       - actions
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list"]
 
   # Odigos sources - the one v1 mutation, gated at runtime by user approval.
   # See odigos-agent/docs/PLAN.md (`apply_create_source`) and ADR-015.
@@ -24,14 +25,14 @@ rules:
     resources: ["sources"]
     verbs: ["create"]
 
-  # Core workload + pod state. Reads only.
+  # Core workload + pod state. Reads only. No `services` or `nodes` - the
+  # destination probe (`probeTCPAndTLS`) dials the resolved endpoint
+  # directly and no tool reads the Node API.
   - apiGroups: [""]
     resources:
       - pods
       - configmaps
-      - services
       - namespaces
-      - nodes
     verbs: ["get", "list"]
 
   # Pod logs - collector and odiglet log inspection.

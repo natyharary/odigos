@@ -42,10 +42,12 @@ one-shot via `docker compose --profile cli run`.
 
 ## In-cluster install (Phase 4)
 
+Both commands assume cwd is the repo root.
+
 Helm:
 
 ```bash
-helm install odigos-ai-agent ../odigos-agent/deploy/helm/odigos-ai-agent \
+helm install odigos-ai-agent odigos-agent/deploy/helm/odigos-ai-agent \
   -n odigos-system --create-namespace \
   --set anthropic.apiKey="$ANTHROPIC_API_KEY" \
   --set agentToken.value="$(openssl rand -hex 32)"
