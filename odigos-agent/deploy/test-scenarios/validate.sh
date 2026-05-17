@@ -104,9 +104,11 @@ run_scenario() {
 
   local expected_root_cause
   local expects_remediation
+  local expected_remediation_op
   local workload_ns workload_kind workload_name
   expected_root_cause=$(jq -r '.expected_root_cause' "${dir}/expected.json")
   expects_remediation=$(jq -r '.expects_proposed_remediation' "${dir}/expected.json")
+  expected_remediation_op=$(jq -r '.expected_remediation_op // ""' "${dir}/expected.json")
   workload_ns=$(jq -r '.workload.namespace' "${dir}/expected.json")
   workload_kind=$(jq -r '.workload.kind' "${dir}/expected.json")
   workload_name=$(jq -r '.workload.name' "${dir}/expected.json")
@@ -175,13 +177,19 @@ run_scenario() {
     fail "${scenario}: did not expect proposed_remediation but got op=${remediation_op}"
     scenario_failed=1
   fi
+  if [[ -n "${expected_remediation_op}" && "${remediation_op}" != "${expected_remediation_op}" ]]; then
+    fail "${scenario}: remediation op mismatch (expected ${expected_remediation_op}, got ${remediation_op:-none})"
+    scenario_failed=1
+  fi
 
   if [[ "${scenario_failed}" -eq 0 ]]; then
     ok "${scenario}: root_cause=${actual_root_cause} remediation=${has_remediation}"
     [[ -n "${remediation_op}" ]] && log "  proposed op: ${remediation_op}"
+    # Drop the raw SSE log on success; keep it on failure for triage.
+    rm -f "${raw_log}"
+  else
+    log "raw SSE stream kept at ${raw_log}"
   fi
-
-  log "raw SSE stream kept at ${raw_log}"
 
   if [[ "${KEEP}" == "1" ]]; then
     log "KEEP=1; leaving scenario resources in place"
