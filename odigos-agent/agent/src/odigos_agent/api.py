@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets as secrets_module
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ from . import events as ev
 from .approvals import ApprovalRegistry, Decision
 from .graph import (
     DEFAULT_MODEL,
-    _GRAPH_TOOL_NAMES,
+    GRAPH_TOOL_NAMES,
     build_graph,
     initial_state,
 )
@@ -68,6 +69,7 @@ class _AppState:
 
 
 _bearer = HTTPBearer(auto_error=False)
+_warned_missing_token = False
 
 
 def _expected_token() -> str | None:
@@ -81,9 +83,19 @@ async def _require_bearer(
     expected = _expected_token()
     if expected is None:
         # No token configured -> allow (dev convenience). Production sets
-        # the env var so this branch never fires.
+        # the env var so this branch never fires. Warn once so a
+        # misconfigured pod is visible in logs instead of silently open.
+        global _warned_missing_token
+        if not _warned_missing_token:
+            logger.warning(
+                "ODIGOS_AGENT_TOKEN not set: serving /debug and /approve "
+                "without authentication. Set the env var in production."
+            )
+            _warned_missing_token = True
         return
-    if creds is None or creds.scheme.lower() != "bearer" or creds.credentials != expected:
+    presented = creds.credentials if creds is not None else ""
+    scheme_ok = creds is not None and creds.scheme.lower() == "bearer"
+    if not scheme_ok or not secrets_module.compare_digest(presented, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or missing bearer token",
@@ -102,7 +114,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info("agent ready: loaded %d MCP tools", len(tools))
     except Exception as exc:  # noqa: BLE001
-        logger.exception("startup failed: %s", exc)
+        logger.exception("agent startup failed")
         app.state.agent = _AppState(
             graph=None,
             approvals=approvals,
@@ -185,6 +197,12 @@ async def _run_debug_session(
 
     Handles a single approval interrupt round-trip. v1 emits at most one
     `create_source` mutation per session so a single resume covers it.
+
+    On client disconnect (CancelledError / GeneratorExit) we must NOT
+    yield from `finally` - the runtime treats that as the generator
+    swallowing the cancel and raises RuntimeError. We track normal
+    completion in `client_disconnected` and gate the trailing `done`
+    event on it.
     """
     yield ev.session(session_id)
     config = {
@@ -195,6 +213,7 @@ async def _run_debug_session(
     }
     pending_interrupt: dict[str, Any] | None = None
     mapper = _StreamMapper()
+    client_disconnected = False
     try:
         async for event in _iter_graph_stream(
             graph, initial_state(workload), config, mapper
@@ -208,39 +227,42 @@ async def _run_debug_session(
             request_id = str(pending_interrupt.get("request_id", ""))
             if not request_id:
                 yield ev.error("interrupt missing request_id")
-                return
-            await approvals.register(session_id, request_id)
-            yield ev.approval_required(
-                request_id=request_id,
-                op=str(pending_interrupt.get("op", "")),
-                yaml=str(pending_interrupt.get("yaml", "")),
-                diff=str(pending_interrupt.get("diff", "")),
-                rollback_command=str(pending_interrupt.get("rollback_command", "")),
-            )
-            decision = await approvals.wait(
-                session_id, request_id, timeout=APPROVAL_TIMEOUT_SECONDS
-            )
-            yield ev.approval_resolved(request_id=request_id, decision=decision)
+            else:
+                await approvals.register(session_id, request_id)
+                yield ev.approval_required(
+                    request_id=request_id,
+                    op=str(pending_interrupt.get("op", "")),
+                    yaml=str(pending_interrupt.get("yaml", "")),
+                    diff=str(pending_interrupt.get("diff", "")),
+                    rollback_command=str(pending_interrupt.get("rollback_command", "")),
+                )
+                decision = await approvals.wait(
+                    session_id, request_id, timeout=APPROVAL_TIMEOUT_SECONDS
+                )
+                yield ev.approval_resolved(request_id=request_id, decision=decision)
 
-            resume_payload = {"decision": decision}
-            async for event in _iter_graph_stream(
-                graph, Command(resume=resume_payload), config, mapper
-            ):
-                if isinstance(event, _InterruptSignal):
-                    # v1 only supports a single mutation per session.
-                    yield ev.error(
-                        "unexpected second interrupt in session", code="too_many_interrupts"
-                    )
-                    return
-                yield event
-    except asyncio.CancelledError:
+                resume_payload = {"decision": decision}
+                async for event in _iter_graph_stream(
+                    graph, Command(resume=resume_payload), config, mapper
+                ):
+                    if isinstance(event, _InterruptSignal):
+                        # v1 only supports a single mutation per session.
+                        yield ev.error(
+                            "unexpected second interrupt in session",
+                            code="too_many_interrupts",
+                        )
+                        break
+                    yield event
+    except (asyncio.CancelledError, GeneratorExit):
+        client_disconnected = True
         raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("debug session %s failed", session_id)
         yield ev.error(f"{type(exc).__name__}: {exc}", code="agent_error")
     finally:
         await approvals.cleanup(session_id)
-        yield ev.done()
+        if not client_disconnected:
+            yield ev.done()
 
 
 @dataclass
@@ -304,7 +326,7 @@ class _StreamMapper:
                 name = str(call.get("name") or "") if isinstance(call, dict) else ""
                 args = call.get("args") if isinstance(call, dict) else None
                 self._tool_calls[tool_id] = {"name": name, "args": args or {}}
-                if name in _GRAPH_TOOL_NAMES and name != "gh_read_file":
+                if name in GRAPH_TOOL_NAMES and name != "gh_read_file":
                     events.append(
                         ev.knowledge_query(
                             phase=self._current_phase,

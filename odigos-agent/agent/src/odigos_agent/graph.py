@@ -89,7 +89,7 @@ _DESTINATION_TOOL_NAMES = frozenset({
     "probe_destination_endpoint",
 })
 
-_GRAPH_TOOL_NAMES = frozenset({
+GRAPH_TOOL_NAMES = frozenset({
     "graph_query",
     "graph_neighbors",
     "graph_path",
@@ -113,7 +113,7 @@ def partition_tools(tools: list[BaseTool]) -> dict[str, list[BaseTool]]:
     def pick(names: frozenset[str]) -> list[BaseTool]:
         return [by_name[name] for name in names if name in by_name]
 
-    graph_tools = pick(_GRAPH_TOOL_NAMES)
+    graph_tools = pick(GRAPH_TOOL_NAMES)
     return {
         "triage": pick(_TRIAGE_TOOL_NAMES),
         "source": pick(_SOURCE_TOOL_NAMES) + graph_tools,

@@ -291,7 +291,7 @@ async def test_debug_approval_round_trip(monkeypatch: pytest.MonkeyPatch) -> Non
 
         async def resolver() -> None:
             # Wait for the SSE handler to register the pending approval.
-            for _ in range(50):
+            for _ in range(100):
                 pending = await _peek_pending(approvals)
                 if pending:
                     sid, rid = pending
@@ -349,6 +349,179 @@ async def test_approve_requires_bearer() -> None:
     async with _async_client() as client:
         r = await client.post("/approve/s/r", json={"decision": "approve"})
         assert r.status_code == 401
+
+
+async def test_debug_approval_deny_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """User denies the approval. SSE should carry approval_resolved with
+    decision=deny, then the resumed graph emits a report with status=denied."""
+    initial_script = [
+        (
+            "updates",
+            {
+                "__interrupt__": {
+                    "request_id": "req-deny",
+                    "op": "create_source",
+                    "yaml": "y\n",
+                    "diff": "d\n",
+                    "rollback_command": "rc",
+                }
+            },
+        ),
+    ]
+    resume_script = [
+        (
+            "updates",
+            {
+                "synthesize": {
+                    "report": {
+                        "root_cause": "source_not_instrumented",
+                        "confidence": 0.5,
+                        "proposed_remediation": {
+                            "op": "create_source",
+                            "request_id": "req-deny",
+                            "yaml": "y\n",
+                            "diff": "d\n",
+                            "rollback_command": "rc",
+                            "status": "denied",
+                            "result": None,
+                        },
+                    },
+                    "step_log": [
+                        {"phase": "synthesize", "action": "done", "ts": 2.0}
+                    ],
+                }
+            },
+        ),
+    ]
+    approvals = ApprovalRegistry()
+    graph = FakeGraph(
+        script=initial_script, resume_script=resume_script, yield_delay=0.02
+    )
+    _install_state(graph=graph, approvals=approvals)
+    monkeypatch.setattr(agent_api, "APPROVAL_TIMEOUT_SECONDS", 5.0)
+
+    async with _async_client() as client:
+
+        async def resolver() -> None:
+            for _ in range(100):
+                pending = await _peek_pending(approvals)
+                if pending:
+                    sid, rid = pending
+                    await client.post(
+                        f"/approve/{sid}/{rid}",
+                        json={"decision": "deny"},
+                        headers={"Authorization": f"Bearer {TOKEN}"},
+                    )
+                    return
+                await asyncio.sleep(0.05)
+            raise AssertionError("no pending approval appeared")
+
+        resolver_task = asyncio.create_task(resolver())
+        try:
+            r = await client.post(
+                "/debug",
+                json={"namespace": "n", "kind": "Deployment", "name": "x"},
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                timeout=10.0,
+            )
+        finally:
+            await asyncio.wait_for(resolver_task, timeout=5.0)
+
+        assert r.status_code == 200, r.text
+        events = _parse_sse(r.text)
+        names = [e["event"] for e in events]
+        assert "approval_required" in names
+        assert "approval_resolved" in names
+        assert "report" in names
+        assert names[-1] == "done"
+        resolved = next(e for e in events if e["event"] == "approval_resolved")
+        assert resolved["data"]["decision"] == "deny"
+        report = next(e for e in events if e["event"] == "report")
+        assert report["data"]["proposed_remediation"]["status"] == "denied"
+
+
+async def test_debug_approval_timeout_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No one approves. SSE should carry approval_resolved with
+    decision=timed_out, then a report with status=timed_out."""
+    initial_script = [
+        (
+            "updates",
+            {
+                "__interrupt__": {
+                    "request_id": "req-tmo",
+                    "op": "create_source",
+                    "yaml": "y\n",
+                    "diff": "d\n",
+                    "rollback_command": "rc",
+                }
+            },
+        ),
+    ]
+    resume_script = [
+        (
+            "updates",
+            {
+                "synthesize": {
+                    "report": {
+                        "root_cause": "source_not_instrumented",
+                        "confidence": 0.5,
+                        "proposed_remediation": {
+                            "op": "create_source",
+                            "request_id": "req-tmo",
+                            "yaml": "y\n",
+                            "diff": "d\n",
+                            "rollback_command": "rc",
+                            "status": "timed_out",
+                            "result": None,
+                        },
+                    },
+                    "step_log": [
+                        {"phase": "synthesize", "action": "done", "ts": 2.0}
+                    ],
+                }
+            },
+        ),
+    ]
+    approvals = ApprovalRegistry()
+    graph = FakeGraph(script=initial_script, resume_script=resume_script)
+    _install_state(graph=graph, approvals=approvals)
+    monkeypatch.setattr(agent_api, "APPROVAL_TIMEOUT_SECONDS", 0.2)
+
+    async with _async_client() as client:
+        r = await client.post(
+            "/debug",
+            json={"namespace": "n", "kind": "Deployment", "name": "x"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            timeout=10.0,
+        )
+        assert r.status_code == 200, r.text
+        events = _parse_sse(r.text)
+        names = [e["event"] for e in events]
+        assert "approval_required" in names
+        assert "approval_resolved" in names
+        assert names[-1] == "done"
+        resolved = next(e for e in events if e["event"] == "approval_resolved")
+        assert resolved["data"]["decision"] == "timed_out"
+
+
+async def test_debug_empty_token_serves_unauthenticated_with_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """Empty ODIGOS_AGENT_TOKEN is a dev convenience; ensure it logs once."""
+    monkeypatch.setenv("ODIGOS_AGENT_TOKEN", "")
+    # Reset the module-level warned flag so the warning fires for this test.
+    monkeypatch.setattr(agent_api, "_warned_missing_token", False)
+    _install_state(graph=FakeGraph(script=[]))
+    async with _async_client() as client:
+        with caplog.at_level("WARNING", logger="odigos_agent.api"):
+            r = await client.post(
+                "/debug",
+                json={"namespace": "n", "kind": "Deployment", "name": "x"},
+            )
+        assert r.status_code == 200, r.text
+        assert any(
+            "ODIGOS_AGENT_TOKEN not set" in record.message for record in caplog.records
+        )
 
 
 async def _peek_pending(registry: ApprovalRegistry) -> tuple[str, str] | None:
