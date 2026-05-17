@@ -6,7 +6,7 @@ import styled from 'styled-components';
 import { OdigosProvider } from '@odigos/ui-kit/contexts';
 import { useDarkMode, useModalStore } from '@odigos/ui-kit/store';
 import { EntityTypes, OtherEntityTypes } from '@odigos/ui-kit/types';
-import { OverviewHeader, OverviewModalsAndDrawers } from '@/components';
+import { AgentDiagnosticsPanel, FixWithAIButton, OverviewHeader, OverviewModalsAndDrawers } from '@/components';
 import { ErrorBoundary, FlexColumn, IconsNav } from '@odigos/ui-kit/components';
 import { useConfig, useDataStreamsCRUD, useSSE, useTokenTracker } from '@/hooks';
 import { DATA_FLOW_HEIGHT, MENU_BAR_HEIGHT, ROUTES, getNavbarIcons } from '@/utils';
@@ -73,6 +73,8 @@ function OverviewLayout({ children }: PropsWithChildren) {
 
           <DataStreamModal />
           <OverviewModalsAndDrawers />
+          <FixWithAIButton />
+          <AgentDiagnosticsPanel />
           <ToastList />
         </PageContent>
       </OdigosProvider>

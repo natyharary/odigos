@@ -68,6 +68,21 @@ spec:
           - name: ODIGOS_SEQUENTIAL_CACHE_LOAD
             value: "true"
           {{- end }}
+          {{- if .Values.ui.aiAgent }}
+          {{- if .Values.ui.aiAgent.url }}
+          - name: AI_AGENT_URL
+            value: {{ .Values.ui.aiAgent.url | quote }}
+          {{- end }}
+          {{- if .Values.ui.aiAgent.tokenSecret }}
+          {{- if .Values.ui.aiAgent.tokenSecret.name }}
+          - name: AI_AGENT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.ui.aiAgent.tokenSecret.name | quote }}
+                key: {{ .Values.ui.aiAgent.tokenSecret.key | default "ODIGOS_AGENT_TOKEN" | quote }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
         ports:
           - containerPort: 3000
             name: ui

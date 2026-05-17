@@ -269,6 +269,10 @@ func startHTTPServer(ctx context.Context,
 	r.POST("/source/namespace/:namespace/kind/:kind/name/:name", services.CreateSourceWithAPI)
 	r.DELETE("/source/namespace/:namespace/kind/:kind/name/:name", services.DeleteSourceWithAPI)
 
+	// "Fix with AI" - SSE proxy to the in-cluster odigos-ai-agent.
+	r.POST("/api/ai/debug", services.AIAgentDebug)
+	r.POST("/api/ai/approve/:session/:request_id", services.AIAgentApprove)
+
 	// Workloads static HTML page
 	r.GET("/workloads", func(c *gin.Context) {
 		data, err := workloadsHTML.ReadFile("graph/workloads.html")

@@ -694,6 +694,25 @@ ui:
 
   # @schema
   # description: |-
+  #   aiAgent:
+  #    - Wiring for the in-cluster odigos-ai-agent ("Fix with AI"). The agent
+  #      ships from the separate `odigos-ai-agent` chart; this block points the
+  #      UI backend at the agent Service and reuses the bearer token secret the
+  #      agent chart creates. Leave the whole block unset to disable the
+  #      "Fix with AI" entry point in the UI.
+  #    - aiAgent.url: HTTP base URL of the agent Service.
+  #    - aiAgent.tokenSecret.name: name of the Secret holding the bearer token
+  #      (defaults to the agent chart's default secret).
+  #    - aiAgent.tokenSecret.key: key inside that Secret (default ODIGOS_AGENT_TOKEN).
+  # @schema
+  aiAgent:
+    url: "http://odigos-ai-agent:8765"
+    tokenSecret:
+      name: "odigos-ai-agent-agent-token"
+      key: "ODIGOS_AGENT_TOKEN"
+
+  # @schema
+  # description: |-
   #   oidcClientId:
   #    - This flag sets the client ID of the OIDC application.
   #    - If not set, the UI will not process OIDC authentication.

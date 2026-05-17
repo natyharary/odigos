@@ -14,7 +14,7 @@ Canonical plan file: [.cursor/plans/odigos-ai-agent-scaffold_aa1c2042.plan.md](.
 - [x] **Phase 2** - LangGraph diagnostic workflow with three subgraphs and structured findings
 - [x] **Phase 3** - Agent HTTP API with SSE streaming + approval endpoint
 - [x] **Phase 4** - Containerize, RBAC, k8s manifests / Helm subchart, deploy to `odigos-system`
-- [ ] **Phase 5** - "Fix with AI" button + Go backend SSE proxy in `frontend/`
+- [x] **Phase 5** - "Fix with AI" button + Go backend SSE proxy in `frontend/`
 - [ ] **Phase 6** - End-to-end validation against broken kind cluster, prompt refinement
 - [ ] **Phase 7** - Source instrumentation overrides (distro/SDK selection, OBI enablement) - first post-v1 expansion of the mutation surface
 - [ ] **Phase 8+** - Second Brain (forward-looking, see appendix)

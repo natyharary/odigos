@@ -178,3 +178,15 @@ lands.
 **Decision.** The shipped ClusterRole has NO `pods/exec`. The only mutation verb is `create` on `odigos.io/sources`, exactly mirroring the v1 mutation surface (Phase 1a `apply_create_source`). All other verbs are `get`/`list` (no `watch` either - no MCP tool builds informers, every read is one-shot per agent call).
 
 **Consequences.** Strictly narrower than PLAN's draft - smaller blast radius if the agent is ever compromised. If a future tool genuinely needs exec (e.g. an interactive debug session), it lands together with an RBAC widening + its own ADR; we don't pre-grant. PLAN.md was not edited in this phase; the divergence is captured here.
+
+---
+
+## ADR-016 - Phase 5 frontend integration: fetch+ReadableStream SSE, floating "Fix with AI" overlay
+
+**Context.** Phase 5 wires the agent into the existing Odigos frontend (Go backend + Next.js webapp). Two micro-decisions were not obvious from the plan and are worth recording.
+
+**Decision (SSE transport).** The webapp consumes the agent stream with `fetch` + `response.body.getReader()` and a tiny SSE parser in `frontend/webapp/lib/aiAgent.ts`. We do NOT use `EventSource` (the existing `useSSE` consumer of `/api/events`). Two reasons: `EventSource` can't issue `POST` (the agent's `/debug` requires a JSON body), and the existing `useSSE` channel is a broadcast bus shared across the whole UI - the AI debug stream is per-session and shouldn't multiplex onto it. The Go backend in `frontend/services/ai_agent.go` is a straight chunk-flushing pass-through; it does not parse events.
+
+**Decision (button placement).** The button lives as a floating fixed-position overlay (`frontend/webapp/components/ai-agent/fix-with-ai-button.tsx`) that appears only when `useDrawerStore().drawerType === EntityTypes.Source`. `SourceDrawer` ships from `@odigos/ui-kit` with no extension slots, and forking the package for a single CTA would couple the agent feature to upstream release cadence. The button reads the currently-selected workload from the ui-kit drawer store and opens an independent `AgentDiagnosticsPanel` (also a fixed-position sibling). When the ui-kit eventually exposes a drawer-extension slot, migrate the button into it and delete the floating shim.
+
+**Consequences.** No ui-kit fork. The SSE parser duplicates a small amount of logic that `EventSource` would otherwise provide for free (under 50 lines). Helm exposes `ui.aiAgent.{url, tokenSecret}` so the UI deployment can reference the agent chart's token secret without the two charts being merged - matches ADR-014's "standalone chart now, fold-in later."

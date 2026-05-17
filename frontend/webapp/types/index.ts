@@ -1,4 +1,5 @@
 export * from './actions';
+export * from './aiAgent';
 export * from './common';
 export * from './config';
 export * from './destinations';

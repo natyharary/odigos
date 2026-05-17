@@ -1,0 +1,210 @@
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import styled from 'styled-components';
+import type { ApprovalDecision, ApprovalRequiredData } from '@/types';
+
+const APPROVAL_TIMEOUT_SECONDS = 300;
+
+const Backdrop = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+`;
+
+const Modal = styled.div`
+  width: min(640px, 92vw);
+  max-height: 86vh;
+  background: ${({ theme }) => theme?.colors?.primary || '#16181d'};
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: ${({ theme }) => theme?.text?.primary || '#fff'};
+  overflow: hidden;
+`;
+
+const Title = styled.h3`
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+`;
+
+const Subtitle = styled.div`
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+`;
+
+const SectionTitle = styled.div`
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.55);
+`;
+
+const Pre = styled.pre`
+  margin: 0;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'Menlo', 'Monaco', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+`;
+
+const Diff = styled(Pre)`
+  background: rgba(20, 60, 30, 0.25);
+`;
+
+const CopyBox = styled.div`
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+`;
+
+const CopyButton = styled.button`
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 12px;
+`;
+
+const ButtonRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+`;
+
+const Action = styled.button<{ $variant: 'approve' | 'deny' }>`
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid
+    ${({ $variant }) => ($variant === 'approve' ? 'rgba(80, 220, 120, 0.6)' : 'rgba(220, 90, 90, 0.6)')};
+  background: ${({ $variant }) =>
+    $variant === 'approve' ? 'rgba(80, 220, 120, 0.15)' : 'rgba(220, 90, 90, 0.12)'};
+  color: ${({ $variant }) => ($variant === 'approve' ? '#7be09e' : '#f0a0a0')};
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`;
+
+interface Props {
+  approval: ApprovalRequiredData;
+  receivedAt: number;
+  onDecide: (decision: ApprovalDecision) => Promise<void> | void;
+}
+
+function formatCountdown(seconds: number): string {
+  if (seconds <= 0) return 'expired';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
+  const [submitting, setSubmitting] = useState<ApprovalDecision | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const remaining = useMemo(() => {
+    const elapsed = Math.floor((now - receivedAt) / 1000);
+    return Math.max(0, APPROVAL_TIMEOUT_SECONDS - elapsed);
+  }, [now, receivedAt]);
+
+  const handle = async (decision: ApprovalDecision) => {
+    if (submitting) return;
+    setSubmitting(decision);
+    try {
+      await onDecide(decision);
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const copy = (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => undefined);
+    }
+  };
+
+  return (
+    <Backdrop>
+      <Modal>
+        <div>
+          <Title>Approval required · {approval.op}</Title>
+          <Subtitle>The agent wants to apply a change. Review below before continuing.</Subtitle>
+        </div>
+
+        <div>
+          <SectionTitle>YAML</SectionTitle>
+          <Pre>{approval.yaml || '(empty)'}</Pre>
+        </div>
+
+        {approval.diff && (
+          <div>
+            <SectionTitle>Diff</SectionTitle>
+            <Diff>{approval.diff}</Diff>
+          </div>
+        )}
+
+        {approval.rollback_command && (
+          <div>
+            <SectionTitle>Rollback</SectionTitle>
+            <CopyBox>
+              <Pre style={{ flex: 1 }}>{approval.rollback_command}</Pre>
+              <CopyButton type="button" onClick={() => copy(approval.rollback_command)}>
+                Copy
+              </CopyButton>
+            </CopyBox>
+          </div>
+        )}
+
+        <ButtonRow>
+          <Subtitle>Auto-deny in {formatCountdown(remaining)}</Subtitle>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Action
+              $variant="deny"
+              type="button"
+              onClick={() => handle('deny')}
+              disabled={submitting !== null}
+            >
+              {submitting === 'deny' ? 'Denying…' : 'Deny'}
+            </Action>
+            <Action
+              $variant="approve"
+              type="button"
+              onClick={() => handle('approve')}
+              disabled={submitting !== null}
+            >
+              {submitting === 'approve' ? 'Approving…' : 'Approve & apply'}
+            </Action>
+          </div>
+        </ButtonRow>
+      </Modal>
+    </Backdrop>
+  );
+};
+
+export { ApprovalModal };
