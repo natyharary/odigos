@@ -1,0 +1,15 @@
+apiVersion: v2
+name: odigos-ai-agent
+description: In-cluster AI debugging agent for Odigos. One pod, three sidecars - LangGraph agent + Go cluster MCP + Python graph MCP - exposed as a ClusterIP service consumed by the Odigos frontend backend.
+type: application
+# Bumped manually until CI rebases this onto the main odigos chart release pipeline.
+version: "0.1.0"
+appVersion: "0.1.0"
+kubeVersion: ">= 1.23.0-0"
+keywords:
+  - odigos
+  - ai
+  - debugging
+  - observability
+sources:
+  - https://github.com/odigos-io/odigos

@@ -11,9 +11,9 @@ Canonical plan file: [.cursor/plans/odigos-ai-agent-scaffold_aa1c2042.plan.md](.
 - [x] **Phase 1b** - MCP tools for collector diagnosis
 - [x] **Phase 1c** - MCP tools for destination diagnosis
 - [x] **Phase 1d** - graph-mcp tools over bundled `graphify-out/` + minimal `gh_read_file` for citations
-- [ ] **Phase 2** - LangGraph diagnostic workflow with three subgraphs and structured findings
-- [ ] **Phase 3** - Agent HTTP API with SSE streaming + approval endpoint
-- [ ] **Phase 4** - Containerize, RBAC, k8s manifests / Helm subchart, deploy to `odigos-system`
+- [x] **Phase 2** - LangGraph diagnostic workflow with three subgraphs and structured findings
+- [x] **Phase 3** - Agent HTTP API with SSE streaming + approval endpoint
+- [x] **Phase 4** - Containerize, RBAC, k8s manifests / Helm subchart, deploy to `odigos-system`
 - [ ] **Phase 5** - "Fix with AI" button + Go backend SSE proxy in `frontend/`
 - [ ] **Phase 6** - End-to-end validation against broken kind cluster, prompt refinement
 - [ ] **Phase 7** - Source instrumentation overrides (distro/SDK selection, OBI enablement) - first post-v1 expansion of the mutation surface

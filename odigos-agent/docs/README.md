@@ -23,9 +23,9 @@ odigos-agent/
 
 ## Status
 
-Phase 0 - scaffold + smoke test. See [PLAN.md](PLAN.md).
+Phases 0-4 landed. See [PLAN.md](PLAN.md) and [PROGRESS.md](PROGRESS.md).
 
-## Local dev (Phase 0 smoke)
+## Local dev
 
 ```bash
 cd odigos-agent
@@ -39,3 +39,28 @@ Expected: ping responses from both MCPs and the bundled commit hash
 `37cf1aee2c0dc10d5801b350eecf870915669d7f`. Plain `docker compose up`
 only starts the two MCPs - the agent CLI is profile-gated so it runs
 one-shot via `docker compose --profile cli run`.
+
+## In-cluster install (Phase 4)
+
+Helm:
+
+```bash
+helm install odigos-ai-agent ../odigos-agent/deploy/helm/odigos-ai-agent \
+  -n odigos-system --create-namespace \
+  --set anthropic.apiKey="$ANTHROPIC_API_KEY" \
+  --set agentToken.value="$(openssl rand -hex 32)"
+```
+
+Raw kustomize (dev inner loop):
+
+```bash
+cp odigos-agent/deploy/raw/anthropic.env.example odigos-agent/deploy/raw/anthropic.env
+cp odigos-agent/deploy/raw/token.env.example     odigos-agent/deploy/raw/token.env
+# edit both with real values; *.env is gitignored under deploy/raw/
+kubectl apply -k odigos-agent/deploy/raw
+```
+
+The service is reachable at `odigos-ai-agent.odigos-system:8765`.
+The frontend Go backend (Phase 5) hits it with the same bearer token.
+End-to-end kind validation against a deliberately broken cluster is
+Phase 6 - the manifests have not yet been exercised against live pods.

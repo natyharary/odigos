@@ -1,0 +1,112 @@
+# Default values for odigos-ai-agent.
+#
+# This chart is intentionally self-contained (not yet a subchart of the main
+# odigos chart) so the agent can be iterated on independently while Phase 4
+# stabilizes. Once the agent ships as a first-class odigos component the
+# defaults here should be folded into helm/odigos/values.yaml and the
+# templates relocated under helm/odigos/templates/ai-agent/.
+
+# -- Global image pull secrets applied to all three containers in the pod.
+# Use the same secret names you already configure for the main odigos chart.
+imagePullSecrets: []
+  # - name: regcred
+
+image:
+  # Default registry prefix - matches the rest of the odigos chart.
+  registry: registry.odigos.io
+  # Per-component image overrides. `repository` is appended to `registry` to
+  # form `<registry>/<repository>:<tag>` unless `repository` already contains
+  # a registry (any value with a `.` or `:` before the first `/`).
+  agent:
+    repository: odigos-ai-agent-agent
+    tag: ""        # falls back to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  mcpCluster:
+    repository: odigos-ai-agent-mcp
+    tag: ""
+    pullPolicy: IfNotPresent
+  mcpGraph:
+    repository: odigos-ai-agent-graph
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# -- Anthropic API key for the LLM. Provide either `apiKey` (chart creates a
+# secret) or `existingSecret` (chart references an existing secret).
+anthropic:
+  apiKey: ""
+  existingSecret: ""
+  existingSecretKey: "ANTHROPIC_API_KEY"
+
+# -- Shared bearer token between the agent and the frontend Go backend.
+# REQUIRED. Provide either `value` (chart creates a secret) or
+# `existingSecret` (chart references an existing secret). When unset the
+# chart fails to render with a clear message.
+agentToken:
+  value: ""
+  existingSecret: ""
+  existingSecretKey: "ODIGOS_AGENT_TOKEN"
+
+# -- Optional GitHub personal access token used by the citation tool
+# (`gh_read_file`) to raise the unauthenticated rate limit on
+# raw.githubusercontent.com. Safe to leave empty.
+github:
+  token: ""
+  existingSecret: ""
+  existingSecretKey: "GITHUB_TOKEN"
+
+# -- Codebase knowledge graph sidecar. When `enabled: false` the mcp-graph
+# container is omitted entirely and the agent runs without graph/wiki tools.
+codebaseGraph:
+  enabled: true
+  # Pinned odigos commit baked into the mcp-graph image; surfaced into the
+  # citation tool so file links resolve at the right revision. Update when
+  # the baked-in graph is rebuilt.
+  pinnedCommit: "37cf1aee"
+
+# -- LLM model name passed to langchain-anthropic.
+model: "claude-sonnet-4-5"
+
+# -- FastAPI log level (debug, info, warning, error).
+logLevel: "info"
+
+# -- Seconds the agent waits for a human approval before timing out a
+# pending mutation. Mirrors APPROVAL_TIMEOUT_SECONDS in agent/api.py.
+approvalTimeoutSeconds: 300
+
+service:
+  type: ClusterIP
+  port: 8765
+
+# Per-container resources. Values picked to fit a small dev cluster; tune
+# for production. Sidecars are deliberately tighter than the agent.
+resources:
+  agent:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  mcpCluster:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  mcpGraph:
+    requests:
+      cpu: "50m"
+      memory: "256Mi"   # merged-graph.json + wiki resident in memory
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+
+# -- Standard scheduling controls. Empty by default.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- Pod-level annotations and labels (e.g. for service mesh injection).
+podAnnotations: {}
+podLabels: {}

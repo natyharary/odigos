@@ -1,0 +1,49 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: odigos-system
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: odigos-ai-agent
+      app.kubernetes.io/part-of: odigos
+      odigos.io/system-object: "true"
+
+resources:
+  - serviceaccount.yaml
+  - clusterrole.yaml
+  - clusterrolebinding.yaml
+  - configmap.yaml
+  - service.yaml
+  - deployment.yaml
+
+# REQUIRED: fill in real values in the .env files before applying. Keep
+# the .env files out of git once edited (covered by repo-root .gitignore
+# `*.env` rules).
+secretGenerator:
+  - name: odigos-ai-agent-anthropic
+    envs: [anthropic.env]
+    options:
+      disableNameSuffixHash: true
+  - name: odigos-ai-agent-token
+    envs: [token.env]
+    options:
+      disableNameSuffixHash: true
+  # Uncomment if you want the citation tool to use a GitHub token.
+  # - name: odigos-ai-agent-github
+  #   envs: [github.env]
+  #   options:
+  #     disableNameSuffixHash: true
+
+# Bump these to point at whichever images you built or pulled.
+images:
+  - name: odigos-ai-agent-agent
+    newName: registry.odigos.io/odigos-ai-agent-agent
+    newTag: "0.1.0"
+  - name: odigos-ai-agent-mcp
+    newName: registry.odigos.io/odigos-ai-agent-mcp
+    newTag: "0.1.0"
+  - name: odigos-ai-agent-graph
+    newName: registry.odigos.io/odigos-ai-agent-graph
+    newTag: "0.1.0"

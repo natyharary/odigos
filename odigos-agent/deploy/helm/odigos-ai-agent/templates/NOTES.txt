@@ -1,0 +1,30 @@
+Odigos AI Agent installed.
+
+The agent runs as a single pod with three containers:
+  - agent       (LangGraph + FastAPI, port 8765)
+  - mcp-cluster (Go MCP for cluster state, localhost:9090)
+  - mcp-graph   (Python MCP for the codebase graph, localhost:9091){{ if not .Values.codebaseGraph.enabled }} - DISABLED{{ end }}
+
+Service: {{ include "odigos-ai-agent.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Smoke test from inside the cluster:
+
+  kubectl -n {{ .Release.Namespace }} run curl --rm -it --restart=Never \
+    --image=curlimages/curl -- \
+    curl -sf http://{{ include "odigos-ai-agent.fullname" . }}:{{ .Values.service.port }}/healthz
+
+Drive a debug run:
+
+  TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret \
+    {{ include "odigos-ai-agent.agentTokenSecretName" . }} \
+    -o jsonpath='{.data.ODIGOS_AGENT_TOKEN}' | base64 -d)
+
+  kubectl -n {{ .Release.Namespace }} run curl --rm -it --restart=Never \
+    --image=curlimages/curl -- \
+    curl -N -H "Authorization: Bearer $TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"namespace":"default","kind":"Deployment","name":"<workload>"}' \
+      http://{{ include "odigos-ai-agent.fullname" . }}:{{ .Values.service.port }}/debug
+
+The frontend Go backend reaches this service via AI_AGENT_URL and
+authenticates with the same bearer token (Phase 5).

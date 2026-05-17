@@ -1,0 +1,54 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "odigos-ai-agent.fullname" . }}
+  labels:
+    {{- include "odigos-ai-agent.labels" . | nindent 4 }}
+rules:
+  # Odigos CRDs - read-only for diagnosis.
+  - apiGroups: ["odigos.io"]
+    resources:
+      - sources
+      - instrumentationconfigs
+      - instrumentationinstances
+      - instrumentationrules
+      - destinations
+      - collectorsgroups
+      - processors
+      - actions
+    verbs: ["get", "list", "watch"]
+
+  # Odigos sources - the one v1 mutation, gated at runtime by user approval.
+  # See odigos-agent/docs/PLAN.md (`apply_create_source`) and ADR-015.
+  - apiGroups: ["odigos.io"]
+    resources: ["sources"]
+    verbs: ["create"]
+
+  # Core workload + pod state. Reads only.
+  - apiGroups: [""]
+    resources:
+      - pods
+      - configmaps
+      - services
+      - namespaces
+      - nodes
+    verbs: ["get", "list"]
+
+  # Pod logs - collector and odiglet log inspection.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+  # Destination secrets - inspected for key names/lengths only; raw values
+  # never leave the MCP. Read-only is sufficient.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+
+  # Workload controllers - the source-side diagnosis reads pod templates.
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list"]

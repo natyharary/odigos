@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: odigos-ai-agent
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: odigos-ai-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: odigos-ai-agent
+      annotations:
+        kubectl.kubernetes.io/default-container: agent
+    spec:
+      serviceAccountName: odigos-ai-agent
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: odigos-ai-agent-agent
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8765
+          envFrom:
+            - configMapRef:
+                name: odigos-ai-agent
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: odigos-ai-agent-anthropic
+                  key: ANTHROPIC_API_KEY
+            - name: ODIGOS_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: odigos-ai-agent-token
+                  key: ODIGOS_AGENT_TOKEN
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        - name: mcp-cluster
+          image: odigos-ai-agent-mcp
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mcp
+              containerPort: 9090
+          env:
+            - name: MCP_CLUSTER_LISTEN_ADDR
+              value: "127.0.0.1:9090"
+            - name: ODIGOS_PINNED_COMMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: odigos-ai-agent
+                  key: ODIGOS_PINNED_COMMIT
+          livenessProbe:
+            tcpSocket:
+              port: 9090
+              host: 127.0.0.1
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 9090
+              host: 127.0.0.1
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        - name: mcp-graph
+          image: odigos-ai-agent-graph
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: graph
+              containerPort: 9091
+          env:
+            - name: MCP_GRAPH_HOST
+              value: "127.0.0.1"
+            - name: MCP_GRAPH_PORT
+              value: "9091"
+          livenessProbe:
+            tcpSocket:
+              port: 9091
+              host: 127.0.0.1
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 9091
+              host: 127.0.0.1
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      terminationGracePeriodSeconds: 30

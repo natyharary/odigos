@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: odigos-ai-agent
+data:
+  MCP_CLUSTER_URL: "http://127.0.0.1:9090/mcp"
+  MCP_GRAPH_URL: "http://127.0.0.1:9091/mcp"
+  ODIGOS_AGENT_MODEL: "claude-sonnet-4-5"
+  LOG_LEVEL: "info"
+  APPROVAL_TIMEOUT_SECONDS: "300"
+  ODIGOS_PINNED_COMMIT: "37cf1aee"

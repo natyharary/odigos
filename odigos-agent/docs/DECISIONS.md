@@ -158,3 +158,23 @@ lands.
 **Decision.** Each domain subgraph's tool catalog includes the full graph/wiki tool set (`graph_query`, `graph_neighbors`, `graph_path`, `graph_community`, `graph_god_nodes`, `graph_list_communities`, `wiki_read`, `graph_metadata`, `gh_read_file`).
 
 **Consequences.** Subgraphs can reach for codebase context in the same loop where they're reading cluster state - no extra round trip through a router. Cost: every subgraph's prompt sees the graph tool descriptions. The per-session budget (max 30 graph/wiki queries + 10 citation reads) lives at the MCP / agent loop level, not per-subgraph, so the catalog overlap doesn't multiply the budget.
+
+---
+
+## ADR-014 - Standalone Helm chart in v1, fold into main odigos chart later
+
+**Context.** PLAN.md Phase 4 calls for a "subchart packaged into the main odigos chart." Doing both - inventing a chart and folding it into `helm/odigos/` simultaneously - couples two unrelated review surfaces and forces the agent's release cadence to match the main chart's from day one. The agent's container shapes (3 sidecars, baked-in graph artifact, optional graph sidecar) are still moving.
+
+**Decision.** Ship a standalone chart at `odigos-agent/deploy/helm/odigos-ai-agent/` plus raw kustomize at `odigos-agent/deploy/raw/`. The chart owns its own `_helpers.tpl` (does not depend on `helm/odigos/templates/_helpers.tpl`) so it can be installed without the main chart present. The fold-in into `helm/odigos/charts/` is a deliberate later step, once Phase 5-6 stabilize the deployment shape.
+
+**Consequences.** Two image-name conventions exist in the repo for a while (`utils.imageName` in main chart, `odigos-ai-agent.image` here). Acceptable cost - the helper here is small and the duplication ends at fold-in time. Operators install with `helm install odigos-ai-agent odigos-agent/deploy/helm/odigos-ai-agent -n odigos-system`.
+
+---
+
+## ADR-015 - Phase 4 RBAC drops `pods/exec` - supersedes PLAN.md draft
+
+**Context.** PLAN.md Phase 4 lists `pods/exec` `create` in the ClusterRole, citing collector metrics scrape and destination probe. ADR-009 already moved metrics scrape to direct in-cluster HTTP (no exec). The destination probe (`mcp/tools/destination.go::probeTCPAndTLS`) uses `net.Dial` from the MCP container itself - also no exec.
+
+**Decision.** The shipped ClusterRole has NO `pods/exec`. The only mutation verb is `create` on `odigos.io/sources`, exactly mirroring the v1 mutation surface (Phase 1a `apply_create_source`). All other verbs are `get`/`list`/`watch`.
+
+**Consequences.** Strictly narrower than PLAN's draft - smaller blast radius if the agent is ever compromised. If a future tool genuinely needs exec (e.g. an interactive debug session), it lands together with an RBAC widening + its own ADR; we don't pre-grant. PLAN.md was not edited in this phase; the divergence is captured here.

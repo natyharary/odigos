@@ -1,0 +1,186 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "odigos-ai-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "odigos-ai-agent.labels" . | nindent 4 }}
+spec:
+  # Approval state lives in agent process memory; a second replica would
+  # drop approvals routed to the other pod. Keep at 1 until approvals are
+  # externalized.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "odigos-ai-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "odigos-ai-agent.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        kubectl.kubernetes.io/default-container: agent
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "odigos-ai-agent.fullname" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range . }}
+        - name: {{ .name }}
+      {{- end }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: {{ include "odigos-ai-agent.image" (dict "image" .Values.image.agent "registry" .Values.image.registry "defaultTag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.image.agent.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "odigos-ai-agent.fullname" . }}
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "odigos-ai-agent.anthropicSecretName" . }}
+                  key: {{ .Values.anthropic.existingSecretKey }}
+            - name: ODIGOS_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "odigos-ai-agent.agentTokenSecretName" . }}
+                  key: {{ .Values.agentToken.existingSecretKey }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          resources:
+            {{- toYaml .Values.resources.agent | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        - name: mcp-cluster
+          image: {{ include "odigos-ai-agent.image" (dict "image" .Values.image.mcpCluster "registry" .Values.image.registry "defaultTag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.image.mcpCluster.pullPolicy }}
+          ports:
+            - name: mcp
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: MCP_CLUSTER_LISTEN_ADDR
+              value: "127.0.0.1:9090"
+            - name: ODIGOS_PINNED_COMMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "odigos-ai-agent.fullname" . }}
+                  key: ODIGOS_PINNED_COMMIT
+            {{- if include "odigos-ai-agent.githubEnabled" . }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "odigos-ai-agent.githubSecretName" . }}
+                  key: {{ .Values.github.existingSecretKey }}
+            {{- end }}
+          # MCP is bound to 127.0.0.1; in-pod TCP probe still works because
+          # probes share the pod network namespace.
+          livenessProbe:
+            tcpSocket:
+              port: 9090
+              host: 127.0.0.1
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 9090
+              host: 127.0.0.1
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.resources.mcpCluster | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        {{- if .Values.codebaseGraph.enabled }}
+        - name: mcp-graph
+          image: {{ include "odigos-ai-agent.image" (dict "image" .Values.image.mcpGraph "registry" .Values.image.registry "defaultTag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.image.mcpGraph.pullPolicy }}
+          ports:
+            - name: graph
+              containerPort: 9091
+              protocol: TCP
+          env:
+            - name: MCP_GRAPH_HOST
+              value: "127.0.0.1"
+            - name: MCP_GRAPH_PORT
+              value: "9091"
+          livenessProbe:
+            tcpSocket:
+              port: 9091
+              host: 127.0.0.1
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 9091
+              host: 127.0.0.1
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          resources:
+            {{- toYaml .Values.resources.mcpGraph | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

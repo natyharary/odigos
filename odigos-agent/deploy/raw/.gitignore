@@ -1,0 +1,4 @@
+# Anything that smells like a real secret stays local. Only the
+# .env.example placeholders are tracked.
+*.env
+!*.env.example
