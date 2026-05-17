@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/odigos-io/odigos/api/k8sconsts"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestUnifiedDiffLinesAddOnly(t *testing.T) {
-	got := unifiedDiffLines("", "alpha\nbeta\n")
+	got := UnifiedDiffLines("", "alpha\nbeta\n")
 	want := "+ alpha\n+ beta\n"
 	if got != want {
 		t.Fatalf("greenfield diff mismatch: got %q want %q", got, want)
@@ -21,7 +22,7 @@ func TestUnifiedDiffLinesAddOnly(t *testing.T) {
 func TestUnifiedDiffLinesContextAndChange(t *testing.T) {
 	before := "alpha\nbeta\n"
 	after := "alpha\ngamma\n"
-	got := unifiedDiffLines(before, after)
+	got := UnifiedDiffLines(before, after)
 	// beta -> gamma at index 1, alpha is context.
 	if got != "  alpha\n- beta\n+ gamma\n" {
 		t.Fatalf("mid-line change diff mismatch: got %q", got)
@@ -29,7 +30,7 @@ func TestUnifiedDiffLinesContextAndChange(t *testing.T) {
 }
 
 func TestUnifiedDiffLinesRemoveOnly(t *testing.T) {
-	got := unifiedDiffLines("alpha\nbeta\n", "")
+	got := UnifiedDiffLines("alpha\nbeta\n", "")
 	want := "- alpha\n- beta\n"
 	if got != want {
 		t.Fatalf("delete-only diff mismatch: got %q want %q", got, want)
@@ -171,7 +172,7 @@ func TestBuildDesiredRulePatchesExistingInPlace(t *testing.T) {
 func TestRollbackHintForGreenfieldUsesManagedByLabel(t *testing.T) {
 	plan := &rulePlan{Namespace: "ns"}
 	hint := rollbackHintFor(plan)
-	if !contains(hint, managedByLabelKey+"="+managedByLabelValue) {
+	if !strings.Contains(hint, managedByLabelKey+"="+managedByLabelValue) {
 		t.Fatalf("expected hint to reference the managed-by selector; got %q", hint)
 	}
 }
@@ -237,17 +238,3 @@ func TestResolveDistroForContainerAcceptsWildcard(t *testing.T) {
 	}
 }
 
-// contains is a tiny strings.Contains alias to keep the test file's imports
-// minimal.
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (haystack == needle || indexOf(haystack, needle) >= 0)
-}
-
-func indexOf(haystack, needle string) int {
-	for index := 0; index+len(needle) <= len(haystack); index++ {
-		if haystack[index:index+len(needle)] == needle {
-			return index
-		}
-	}
-	return -1
-}

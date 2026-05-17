@@ -117,13 +117,13 @@ func TestIsSupportedWorkloadKind(t *testing.T) {
 	}
 }
 
-func TestPrefixLines(t *testing.T) {
-	got := prefixLines("a\nb\n", "+ ")
+func TestUnifiedDiffLinesGreenfield(t *testing.T) {
+	got := UnifiedDiffLines("", "a\nb\n")
 	want := "+ a\n+ b\n"
 	if got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
-	if prefixLines("", "+ ") != "" {
+	if UnifiedDiffLines("", "") != "" {
 		t.Error("empty input must produce empty output")
 	}
 }
@@ -309,9 +309,9 @@ func TestStripServerFieldsErasesMetadata(t *testing.T) {
 	}
 }
 
-func TestPrefixLinesCollapsesTrailingBlankLines(t *testing.T) {
-	got := prefixLines("alpha\nbeta\n\n", "> ")
-	want := "> alpha\n> beta\n"
+func TestUnifiedDiffLinesCollapsesTrailingBlankLines(t *testing.T) {
+	got := UnifiedDiffLines("", "alpha\nbeta\n\n")
+	want := "+ alpha\n+ beta\n"
 	if got != want {
 		t.Errorf("got %q want %q", got, want)
 	}

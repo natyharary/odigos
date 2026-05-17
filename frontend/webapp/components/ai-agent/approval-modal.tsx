@@ -76,12 +76,6 @@ const Callout = styled.div`
   line-height: 1.45;
 `;
 
-const YamlPair = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-`;
-
 const CopyBox = styled.div`
   display: flex;
   align-items: stretch;
@@ -185,7 +179,7 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
         {callout && <Callout>{callout}</Callout>}
 
         {showBeforeAfter ? (
-          <YamlPair>
+          <>
             <div>
               <SectionTitle>Before</SectionTitle>
               <Pre>{approval.yaml_before || '(no existing InstrumentationRule)'}</Pre>
@@ -194,7 +188,7 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
               <SectionTitle>After</SectionTitle>
               <Pre>{approval.yaml_after || '(empty)'}</Pre>
             </div>
-          </YamlPair>
+          </>
         ) : (
           <div>
             <SectionTitle>YAML</SectionTitle>
@@ -255,11 +249,6 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
   );
 };
 
-// buildCallout renders a short, op-specific explanation above the YAML view.
-// `create_source` is greenfield and self-explanatory from the YAML alone, so
-// no callout is shown. The other ops carry structured context from the MCP
-// (language, from/to distro) which is much more readable here than in the
-// raw diff.
 function buildCallout(approval: ApprovalRequiredData): string | null {
   const context = (approval.context || {}) as Record<string, string>;
   switch (approval.op) {

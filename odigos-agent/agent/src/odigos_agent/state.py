@@ -83,11 +83,9 @@ class Finding(BaseModel):
 class ProposedRemediation(BaseModel):
     """A pending or resolved mutation proposal.
 
-    Phase 2 introduced `create_source` as the only op (populates `yaml`).
-    Phase 7 adds `override_distro`, `enable_obi`, `disable_obi` - all patch
-    or create an `InstrumentationRule` so they populate `yaml_before` /
-    `yaml_after` instead. `context` carries op-specific structured fields
-    the UI surfaces alongside the diff (language, from/to distro names).
+    `create_source` populates `yaml` (greenfield Source CR); the rule-patch
+    ops populate `yaml_before` / `yaml_after`. `context` carries op-specific
+    structured fields the UI surfaces alongside the diff.
     """
 
     op: RemediationOp

@@ -74,19 +74,14 @@ _SOURCE_TOOL_NAMES = frozenset({
     "propose_disable_obi",
 })
 
-_PROPOSE_TOOLS_BY_OP: dict[str, str] = {
-    "create_source": "propose_create_source",
-    "override_distro": "propose_override_distro",
-    "enable_obi": "propose_enable_obi",
-    "disable_obi": "propose_disable_obi",
-}
-
-_APPLY_TOOLS_BY_OP: dict[str, str] = {
-    "create_source": "apply_create_source",
-    "override_distro": "apply_override_distro",
-    "enable_obi": "apply_enable_obi",
-    "disable_obi": "apply_disable_obi",
-}
+_REMEDIATION_OPS: tuple[str, ...] = (
+    "create_source",
+    "override_distro",
+    "enable_obi",
+    "disable_obi",
+)
+_PROPOSE_TOOLS_BY_OP: dict[str, str] = {op: f"propose_{op}" for op in _REMEDIATION_OPS}
+_APPLY_TOOLS_BY_OP: dict[str, str] = {op: f"apply_{op}" for op in _REMEDIATION_OPS}
 
 _COLLECTOR_TOOL_NAMES = frozenset({
     "get_collectors_group",
@@ -219,10 +214,6 @@ def _extract_proposed_remediation(messages: list[Any]) -> ProposedRemediation | 
     Honors the most recent successful proposal (LLM is told to propose
     once; if it re-proposes, the last one wins). Skips error proposals
     so a transient k8s error doesn't masquerade as a pending approval.
-
-    The `op` literal returned by the MCP determines the schema of the
-    payload. `create_source` populates `yaml` (greenfield); the Phase 7
-    ops populate `yaml_before` / `yaml_after`.
     """
     for message in reversed(messages):
         if not isinstance(message, ToolMessage):

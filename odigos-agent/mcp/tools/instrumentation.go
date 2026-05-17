@@ -47,20 +47,31 @@ func RegisterInstrumentationTools(server *mcpserver.MCPServer, clients *Clients,
 	if err != nil {
 		log.Fatalf("load embedded distro registry: %v", err)
 	}
+	ebpfByLanguage := map[common.ProgrammingLanguage]string{}
+	for _, entry := range getter.GetAllDistros() {
+		if !entry.IsEbpf {
+			continue
+		}
+		if _, exists := ebpfByLanguage[entry.Language]; !exists {
+			ebpfByLanguage[entry.Language] = entry.Name
+		}
+	}
 	manager := &instrumentationManager{
-		clients:   clients,
-		approvals: approvals,
-		distros:   getter,
-		defaulter: distros.NewCommunityDefaulter(),
+		clients:        clients,
+		approvals:      approvals,
+		distros:        getter,
+		defaulter:      distros.NewCommunityDefaulter(),
+		ebpfByLanguage: ebpfByLanguage,
 	}
 	manager.register(server)
 }
 
 type instrumentationManager struct {
-	clients   *Clients
-	approvals *ApprovalCache
-	distros   *distros.Getter
-	defaulter distros.Defaulter
+	clients        *Clients
+	approvals      *ApprovalCache
+	distros        *distros.Getter
+	defaulter      distros.Defaulter
+	ebpfByLanguage map[common.ProgrammingLanguage]string
 }
 
 func (m *instrumentationManager) register(server *mcpserver.MCPServer) {
@@ -150,7 +161,7 @@ func (m *instrumentationManager) listAvailableDistros(_ context.Context, request
 }
 
 func (m *instrumentationManager) getWorkloadDistro(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, kind, name, errResult, ok := requireWorkloadArgs(request)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
 	if !ok {
 		return errResult, nil
 	}
@@ -204,7 +215,7 @@ func (m *instrumentationManager) getWorkloadDistro(ctx context.Context, request 
 }
 
 func (m *instrumentationManager) checkObiEligibility(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, kind, name, errResult, ok := requireWorkloadArgs(request)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
 	if !ok {
 		return errResult, nil
 	}
@@ -259,7 +270,7 @@ func (m *instrumentationManager) checkObiEligibility(ctx context.Context, reques
 // ---- mutation handlers ----
 
 func (m *instrumentationManager) proposeOverrideDistro(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, kind, name, errResult, ok := requireWorkloadArgs(request)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
 	if !ok {
 		return errResult, nil
 	}
@@ -275,7 +286,7 @@ func (m *instrumentationManager) proposeOverrideDistro(ctx context.Context, requ
 }
 
 func (m *instrumentationManager) proposeEnableObi(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, kind, name, errResult, ok := requireWorkloadArgs(request)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
 	if !ok {
 		return errResult, nil
 	}
@@ -287,7 +298,7 @@ func (m *instrumentationManager) proposeEnableObi(ctx context.Context, request m
 }
 
 func (m *instrumentationManager) proposeDisableObi(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, kind, name, errResult, ok := requireWorkloadArgs(request)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
 	if !ok {
 		return errResult, nil
 	}
@@ -369,24 +380,25 @@ func (m *instrumentationManager) applyDisableObi(ctx context.Context, request mc
 
 // ---- shared mutation plumbing ----
 
-// rulePlan captures everything needed to (a) preview a distro change as YAML
-// and (b) execute it on apply. Each propose_* handler builds one; cacheAndRespond
-// stores it under a request_id and serialises the preview for the agent.
+// rulePlan captures the dry-run output of a proposed distro change. Each
+// propose_* handler builds one; cacheAndRespond stores it under a request_id
+// and serialises the preview for the agent. The existence-check round-trip
+// against the apps/batch API is elided here: getInstrumentationConfig's
+// NotFound path already implies the workload isn't being tracked by odigos.
 type rulePlan struct {
-	Op             string
-	Namespace      string
-	WorkloadKind   string
-	WorkloadName   string
-	Language       common.ProgrammingLanguage
-	FromDistro     string
-	ToDistro       string
-	ExistingRule   *odigosv1.InstrumentationRule // nil when greenfield create
-	DesiredRule    *odigosv1.InstrumentationRule // nil when the change deletes the rule
-	YAMLBefore     string
-	YAMLAfter      string
-	Diff           string
-	RollbackHint   string
-	Context        map[string]any
+	Op           string
+	Namespace    string
+	WorkloadKind string
+	WorkloadName string
+	Language     common.ProgrammingLanguage
+	FromDistro   string
+	ToDistro     string
+	ExistingRule *odigosv1.InstrumentationRule
+	DesiredRule  *odigosv1.InstrumentationRule
+	YAMLBefore   string
+	YAMLAfter    string
+	Diff         string
+	RollbackHint string
 }
 
 func (m *instrumentationManager) planDistroChange(
@@ -399,12 +411,6 @@ func (m *instrumentationManager) planDistroChange(
 	}
 	if k8sconsts.WorkloadKind(kind) == k8sconsts.WorkloadKindNamespace {
 		return nil, fmt.Errorf("namespace-scoped workloads not supported for distro overrides")
-	}
-	if _, _, _, err := FetchPodTemplate(ctx, m.clients, namespace, kind, name); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("workload %s %s/%s not found", kind, namespace, name)
-		}
-		return nil, fmt.Errorf("validate workload %s %s/%s: %v", kind, namespace, name, err)
 	}
 
 	config, found, err := m.getInstrumentationConfig(ctx, namespace, kind, name)
@@ -435,8 +441,6 @@ func (m *instrumentationManager) planDistroChange(
 	}
 
 	managedRule := pickManagedRule(existingRules, namespace, kind, name)
-	desiredRule := buildDesiredRule(managedRule, namespace, kind, name, language, targetDistro, op)
-
 	plan := &rulePlan{
 		Op:           op,
 		Namespace:    namespace,
@@ -446,14 +450,13 @@ func (m *instrumentationManager) planDistroChange(
 		FromDistro:   currentDistro,
 		ToDistro:     targetDistro,
 		ExistingRule: managedRule,
-		DesiredRule:  desiredRule,
+		DesiredRule:  buildDesiredRule(managedRule, namespace, kind, name, language, targetDistro, op),
 	}
 
 	if err := m.dryRunRulePlan(ctx, plan); err != nil {
 		return nil, err
 	}
 	plan.RollbackHint = rollbackHintFor(plan)
-	plan.Context = contextFor(plan)
 	return plan, nil
 }
 
@@ -494,7 +497,7 @@ func (m *instrumentationManager) dryRunRulePlan(ctx context.Context, plan *ruleP
 		plan.YAMLAfter = string(yamlBytes)
 	}
 
-	plan.Diff = unifiedDiffLines(plan.YAMLBefore, plan.YAMLAfter)
+	plan.Diff = UnifiedDiffLines(plan.YAMLBefore, plan.YAMLAfter)
 	return nil
 }
 
@@ -508,7 +511,7 @@ func (m *instrumentationManager) cacheAndRespond(plan *rulePlan, auditOp string)
 		YAMLAfter:    plan.YAMLAfter,
 		Diff:         plan.Diff,
 		RollbackHint: plan.RollbackHint,
-		Context:      plan.Context,
+		TargetDistro: plan.ToDistro,
 	})
 	log.Printf("audit: op=%s ns=%s kind=%s name=%s request_id=%s language=%s from=%s to=%s",
 		auditOp, plan.Namespace, plan.WorkloadKind, plan.WorkloadName, requestID,
@@ -523,7 +526,7 @@ func (m *instrumentationManager) cacheAndRespond(plan *rulePlan, auditOp string)
 		"yaml_after":       plan.YAMLAfter,
 		"diff":             plan.Diff,
 		"rollback_command": plan.RollbackHint,
-		"context":          plan.Context,
+		"context":          planContext(plan),
 		"expires_in":       int(defaultApprovalTTL.Seconds()),
 	})
 }
@@ -561,19 +564,13 @@ func (m *instrumentationManager) applyDistroChange(ctx context.Context, request 
 
 func (m *instrumentationManager) replanForApply(ctx context.Context, pending *PendingMutation, expectedOp string) (*rulePlan, error) {
 	// Reuse the same picker the propose handler ran, so apply re-checks every
-	// op-specific invariant against fresh live state. For override_distro the
-	// target distro name is restored from the cached context; the other ops
-	// re-derive their target from the language picker uses internally.
-	targetName := ""
-	if expectedOp == "override_distro" {
-		if value, ok := pending.Context["to_distro"].(string); ok {
-			targetName = value
-		}
-		if targetName == "" {
-			return nil, fmt.Errorf("cached context is missing a non-empty to_distro for override_distro")
-		}
+	// op-specific invariant against fresh live state. override_distro restores
+	// the user-supplied target from the cached PendingMutation; the OBI ops
+	// derive their target from the language at picker invocation time.
+	if expectedOp == "override_distro" && pending.TargetDistro == "" {
+		return nil, fmt.Errorf("cached pending mutation is missing TargetDistro for override_distro")
 	}
-	return m.planDistroChange(ctx, pending.Namespace, pending.WorkloadKind, pending.WorkloadName, expectedOp, m.makePicker(expectedOp, targetName))
+	return m.planDistroChange(ctx, pending.Namespace, pending.WorkloadKind, pending.WorkloadName, expectedOp, m.makePicker(expectedOp, pending.TargetDistro))
 }
 
 func (m *instrumentationManager) executePlan(ctx context.Context, plan *rulePlan) (map[string]any, error) {
@@ -609,25 +606,6 @@ func (m *instrumentationManager) executePlan(ctx context.Context, plan *rulePlan
 }
 
 // ---- helpers ----
-
-func requireWorkloadArgs(request mcp.CallToolRequest) (string, string, string, *mcp.CallToolResult, bool) {
-	namespace, err := request.RequireString("namespace")
-	if err != nil {
-		result, _ := ToolError("namespace required: %v", err)
-		return "", "", "", result, false
-	}
-	kind, err := request.RequireString("kind")
-	if err != nil {
-		result, _ := ToolError("kind required: %v", err)
-		return "", "", "", result, false
-	}
-	name, err := request.RequireString("name")
-	if err != nil {
-		result, _ := ToolError("name required: %v", err)
-		return "", "", "", result, false
-	}
-	return namespace, kind, name, nil, true
-}
 
 func (m *instrumentationManager) getInstrumentationConfig(ctx context.Context, namespace, kind, name string) (*odigosv1.InstrumentationConfig, bool, error) {
 	configName := workload.CalculateWorkloadRuntimeObjectName(name, kind)
@@ -765,17 +743,17 @@ func rollbackHintFor(plan *rulePlan) string {
 		plan.Namespace, plan.YAMLBefore)
 }
 
-func contextFor(plan *rulePlan) map[string]any {
+func planContext(plan *rulePlan) map[string]any {
 	context := map[string]any{
 		"language":    string(plan.Language),
 		"from_distro": plan.FromDistro,
 		"to_distro":   plan.ToDistro,
 	}
-	if plan.Op == "enable_obi" {
+	switch plan.Op {
+	case "enable_obi":
 		context["ebpf_distro_name"] = plan.ToDistro
 		context["prior_distro"] = plan.FromDistro
-	}
-	if plan.Op == "disable_obi" {
+	case "disable_obi":
 		context["removed_distro"] = plan.FromDistro
 		context["restored_to"] = plan.ToDistro
 	}
@@ -857,13 +835,12 @@ func resolveLanguageDistro(
 }
 
 func (m *instrumentationManager) ebpfDistroForLanguage(language common.ProgrammingLanguage) string {
-	// Prefer a language-native eBPF distro if registered.
-	for _, distroEntry := range m.distros.GetAllDistros() {
-		if distroEntry.Language == language && distroEntry.IsEbpf {
-			return distroEntry.Name
-		}
+	if name, ok := m.ebpfByLanguage[language]; ok {
+		return name
 	}
-	// Fall back to the wildcard universal eBPF distro.
+	if name, ok := m.ebpfByLanguage[common.ProgrammingLanguageWildcard]; ok {
+		return name
+	}
 	if m.distros.GetDistroByName(obiUniversalDistroName) != nil {
 		return obiUniversalDistroName
 	}
@@ -944,42 +921,3 @@ func buildSpecMergePatch(spec odigosv1.InstrumentationRuleSpec) ([]byte, error) 
 	return json.Marshal(body)
 }
 
-// unifiedDiffLines produces a tiny unified-style diff used in the approval
-// preview. Lines removed from `before` get a `-` prefix, lines added in `after`
-// get `+`. Lines that match in order pass through with a single space. This is
-// not a full LCS diff - it's enough for the UI's purposes.
-func unifiedDiffLines(before, after string) string {
-	beforeLines := strings.Split(strings.TrimRight(before, "\n"), "\n")
-	afterLines := strings.Split(strings.TrimRight(after, "\n"), "\n")
-	if before == "" {
-		beforeLines = nil
-	}
-	if after == "" {
-		afterLines = nil
-	}
-	var builder strings.Builder
-	maxLen := len(beforeLines)
-	if len(afterLines) > maxLen {
-		maxLen = len(afterLines)
-	}
-	for index := 0; index < maxLen; index++ {
-		switch {
-		case index < len(beforeLines) && index < len(afterLines) && beforeLines[index] == afterLines[index]:
-			builder.WriteString("  ")
-			builder.WriteString(beforeLines[index])
-			builder.WriteByte('\n')
-		default:
-			if index < len(beforeLines) {
-				builder.WriteString("- ")
-				builder.WriteString(beforeLines[index])
-				builder.WriteByte('\n')
-			}
-			if index < len(afterLines) {
-				builder.WriteString("+ ")
-				builder.WriteString(afterLines[index])
-				builder.WriteByte('\n')
-			}
-		}
-	}
-	return builder.String()
-}

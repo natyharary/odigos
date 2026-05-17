@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -120,17 +119,9 @@ func (m *sourceManager) register(server *mcpserver.MCPServer) {
 // ---- handlers ----
 
 func (m *sourceManager) getSource(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, err := request.RequireString("namespace")
-	if err != nil {
-		return ToolError("namespace required: %v", err)
-	}
-	kind, err := request.RequireString("kind")
-	if err != nil {
-		return ToolError("kind required: %v", err)
-	}
-	name, err := request.RequireString("name")
-	if err != nil {
-		return ToolError("name required: %v", err)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
+	if !ok {
+		return errResult, nil
 	}
 
 	list, err := m.clients.Odigos.OdigosV1alpha1().Sources(namespace).List(ctx, metav1.ListOptions{})
@@ -144,17 +135,9 @@ func (m *sourceManager) getSource(ctx context.Context, request mcp.CallToolReque
 }
 
 func (m *sourceManager) getInstrumentationConfig(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, err := request.RequireString("namespace")
-	if err != nil {
-		return ToolError("namespace required: %v", err)
-	}
-	kind, err := request.RequireString("kind")
-	if err != nil {
-		return ToolError("kind required: %v", err)
-	}
-	name, err := request.RequireString("name")
-	if err != nil {
-		return ToolError("name required: %v", err)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
+	if !ok {
+		return errResult, nil
 	}
 
 	configName := workload.CalculateWorkloadRuntimeObjectName(name, kind)
@@ -178,17 +161,9 @@ func (m *sourceManager) getInstrumentationConfig(ctx context.Context, request mc
 }
 
 func (m *sourceManager) listInstrumentationInstances(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, err := request.RequireString("namespace")
-	if err != nil {
-		return ToolError("namespace required: %v", err)
-	}
-	kind, err := request.RequireString("kind")
-	if err != nil {
-		return ToolError("kind required: %v", err)
-	}
-	name, err := request.RequireString("name")
-	if err != nil {
-		return ToolError("name required: %v", err)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
+	if !ok {
+		return errResult, nil
 	}
 
 	runtimeObject := workload.CalculateWorkloadRuntimeObjectName(name, kind)
@@ -214,17 +189,9 @@ func (m *sourceManager) listInstrumentationInstances(ctx context.Context, reques
 }
 
 func (m *sourceManager) getWorkload(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, err := request.RequireString("namespace")
-	if err != nil {
-		return ToolError("namespace required: %v", err)
-	}
-	kind, err := request.RequireString("kind")
-	if err != nil {
-		return ToolError("kind required: %v", err)
-	}
-	name, err := request.RequireString("name")
-	if err != nil {
-		return ToolError("name required: %v", err)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
+	if !ok {
+		return errResult, nil
 	}
 
 	template, selector, ownerRefs, err := m.fetchPodTemplate(ctx, namespace, kind, name)
@@ -256,17 +223,9 @@ func (m *sourceManager) getWorkload(ctx context.Context, request mcp.CallToolReq
 }
 
 func (m *sourceManager) listWorkloadPods(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, err := request.RequireString("namespace")
-	if err != nil {
-		return ToolError("namespace required: %v", err)
-	}
-	kind, err := request.RequireString("kind")
-	if err != nil {
-		return ToolError("kind required: %v", err)
-	}
-	name, err := request.RequireString("name")
-	if err != nil {
-		return ToolError("name required: %v", err)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
+	if !ok {
+		return errResult, nil
 	}
 
 	_, selector, _, err := m.fetchPodTemplate(ctx, namespace, kind, name)
@@ -419,17 +378,9 @@ func (m *sourceManager) listInstrumentationRules(ctx context.Context, _ mcp.Call
 }
 
 func (m *sourceManager) proposeCreateSource(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	namespace, err := request.RequireString("namespace")
-	if err != nil {
-		return ToolError("namespace required: %v", err)
-	}
-	kind, err := request.RequireString("kind")
-	if err != nil {
-		return ToolError("kind required: %v", err)
-	}
-	name, err := request.RequireString("name")
-	if err != nil {
-		return ToolError("name required: %v", err)
+	namespace, kind, name, errResult, ok := RequireWorkloadArgs(request)
+	if !ok {
+		return errResult, nil
 	}
 
 	if !IsSupportedWorkloadKind(kind) {
@@ -474,7 +425,7 @@ func (m *sourceManager) proposeCreateSource(ctx context.Context, request mcp.Cal
 		return ToolError("marshal dry-run Source to YAML: %v", err)
 	}
 	yamlText := string(yamlBytes)
-	diff := prefixLines(yamlText, "+ ")
+	diff := UnifiedDiffLines("", yamlText)
 	rollback := fmt.Sprintf(
 		"kubectl delete source -n %s -l %s=%s,%s=%s",
 		namespace,
@@ -811,17 +762,6 @@ func stripServerFields(source *odigosv1.Source) *odigosv1.Source {
 	clone.CreationTimestamp = metav1.Time{}
 	clone.UID = ""
 	return clone
-}
-
-func prefixLines(text, prefix string) string {
-	if text == "" {
-		return ""
-	}
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	for index, line := range lines {
-		lines[index] = prefix + line
-	}
-	return strings.Join(lines, "\n") + "\n"
 }
 
 func ptrInt64(value int64) *int64 { return &value }

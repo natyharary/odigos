@@ -7,6 +7,7 @@ package tools
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,11 +60,9 @@ func OdigosNamespace() string { return env.GetCurrentNamespace() }
 // rebuilds the runtime object from these on apply rather than trusting cached
 // bytes.
 //
-// create_source (greenfield): populates YAML only.
-// override_distro / enable_obi / disable_obi (patch existing rule, or create
-// a new workload-scoped rule): populate YAMLBefore + YAMLAfter. Context
-// carries op-specific structured data (language, from/to distro names, etc.)
-// that the UI surfaces alongside the diff.
+// create_source populates YAML (greenfield); the rule-patch ops populate
+// YAMLBefore + YAMLAfter. TargetDistro is set by the rule-patch ops so apply
+// can re-run the same op-specific picker against fresh live state.
 type PendingMutation struct {
 	Operation    string
 	Namespace    string
@@ -74,7 +73,7 @@ type PendingMutation struct {
 	YAMLAfter    string
 	Diff         string
 	RollbackHint string
-	Context      map[string]any
+	TargetDistro string
 	CreatedAt    time.Time
 }
 
@@ -148,6 +147,29 @@ func WriteJSON(value any) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultStructuredOnly(value), nil
 }
 
+// RequireWorkloadArgs pulls the canonical (namespace, kind, name) string trio
+// every workload-targeted MCP tool needs, returning a populated tool-error
+// result if any is missing. Callers should `return errResult, nil` when ok is
+// false.
+func RequireWorkloadArgs(request mcp.CallToolRequest) (namespace, kind, name string, errResult *mcp.CallToolResult, ok bool) {
+	namespace, err := request.RequireString("namespace")
+	if err != nil {
+		result, _ := ToolError("namespace required: %v", err)
+		return "", "", "", result, false
+	}
+	kind, err = request.RequireString("kind")
+	if err != nil {
+		result, _ := ToolError("kind required: %v", err)
+		return "", "", "", result, false
+	}
+	name, err = request.RequireString("name")
+	if err != nil {
+		result, _ := ToolError("name required: %v", err)
+		return "", "", "", result, false
+	}
+	return namespace, kind, name, nil, true
+}
+
 // ToolError returns an MCP tool result flagged as an error. Callers should
 // return (result, nil) - the protocol surfaces IsError to the LLM rather than
 // transporting a Go error.
@@ -172,4 +194,43 @@ func ClampInt(v, low, high int) int {
 		return high
 	}
 	return v
+}
+
+// UnifiedDiffLines produces a tiny unified-style diff used in approval
+// previews. Lines removed from `before` get a `-` prefix, lines added in
+// `after` get `+`, lines that match in order pass through with two spaces.
+// Not a full LCS diff - it's enough for the UI to render.
+func UnifiedDiffLines(before, after string) string {
+	var beforeLines, afterLines []string
+	if before != "" {
+		beforeLines = strings.Split(strings.TrimRight(before, "\n"), "\n")
+	}
+	if after != "" {
+		afterLines = strings.Split(strings.TrimRight(after, "\n"), "\n")
+	}
+	maxLen := len(beforeLines)
+	if len(afterLines) > maxLen {
+		maxLen = len(afterLines)
+	}
+	var builder strings.Builder
+	for index := 0; index < maxLen; index++ {
+		switch {
+		case index < len(beforeLines) && index < len(afterLines) && beforeLines[index] == afterLines[index]:
+			builder.WriteString("  ")
+			builder.WriteString(beforeLines[index])
+			builder.WriteByte('\n')
+		default:
+			if index < len(beforeLines) {
+				builder.WriteString("- ")
+				builder.WriteString(beforeLines[index])
+				builder.WriteByte('\n')
+			}
+			if index < len(afterLines) {
+				builder.WriteString("+ ")
+				builder.WriteString(afterLines[index])
+				builder.WriteByte('\n')
+			}
+		}
+	}
+	return builder.String()
 }
