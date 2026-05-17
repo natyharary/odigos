@@ -42,31 +42,42 @@ export interface ApprovalRequiredData {
 
 export type ApprovalDecision = 'approve' | 'deny' | 'timed_out';
 
+// Phase tags mirror the subgraph names + the framing nodes in
+// odigos-agent/agent/src/odigos_agent/graph.py.
+export type AgentPhase =
+  | 'input'
+  | 'triage'
+  | 'source'
+  | 'collector'
+  | 'destination'
+  | 'apply_remediation'
+  | 'synthesize';
+
 export interface SessionEventData {
   debug_session_id: string;
 }
 
 export interface StepEventData {
-  phase: string;
+  phase: AgentPhase;
   message: string;
   ts: number;
   detail?: Record<string, unknown>;
 }
 
 export interface KnowledgeQueryEventData {
-  phase: string;
+  phase: AgentPhase;
   tool: string;
   query: string;
 }
 
 export interface CodebaseReadEventData {
-  phase?: string;
+  phase?: AgentPhase;
   path: string;
   lines: string;
 }
 
 export interface FindingEventData {
-  phase: string;
+  phase: AgentPhase;
   summary: string;
 }
 

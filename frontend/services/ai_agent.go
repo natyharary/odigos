@@ -189,10 +189,9 @@ func relayUpstreamError(c *gin.Context, resp *http.Response) {
 	c.Data(resp.StatusCode, contentType, body)
 }
 
-// streamWithFlush copies the agent's SSE bytes through to the gin writer,
-// flushing on each read so each event reaches the browser as soon as it
-// arrives upstream. We deliberately keep the buffer small so a single event
-// surfaces in one flush even on slow agent streams.
+// streamWithFlush copies the agent's SSE bytes through to the gin
+// writer, flushing on each read so each event reaches the browser as
+// soon as it arrives upstream.
 func streamWithFlush(w io.Writer, flusher http.Flusher, src io.Reader) {
 	buf := make([]byte, 4096)
 	for {

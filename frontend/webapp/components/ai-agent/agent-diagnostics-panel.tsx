@@ -253,7 +253,10 @@ const AgentDiagnosticsPanel: React.FC = () => {
     close();
   };
 
-  const visibleSteps = useMemo(() => state.steps.filter((event) => renderStep(event, 0) !== null), [state.steps]);
+  const visibleSteps = useMemo(
+    () => state.steps.filter((event) => event.event === 'step' || event.event === 'finding' || event.event === 'knowledge_query' || event.event === 'codebase_read'),
+    [state.steps],
+  );
   const latestStep = useMemo(() => {
     for (let i = state.steps.length - 1; i >= 0; i--) {
       const event = state.steps[i];

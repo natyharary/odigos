@@ -91,8 +91,9 @@ export function streamAIDebug(input: DebugInput, callbacks: StreamCallbacks): St
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, '\n');
+        // Normalize CRLF on each chunk only - replacing on the whole
+        // buffer is O(n^2) over a long-lived stream.
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
         let separatorIdx = buffer.indexOf('\n\n');
         while (separatorIdx !== -1) {
           const block = buffer.slice(0, separatorIdx);
