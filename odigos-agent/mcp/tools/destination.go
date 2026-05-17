@@ -220,7 +220,7 @@ func (m *destinationManager) getDestinationConfigInGateway(ctx context.Context, 
 		return ToolError("parse gateway config: %v", parseErr)
 	}
 	exporters := findExportersForDestination(parsed, destinationName)
-	pipelineRefs := findPipelinesUsingExporters(parsed, keysOfAnyMap(exporters))
+	pipelineRefs := findPipelinesUsingExporters(parsed, sortedMapKeys(exporters))
 	return WriteJSON(map[string]any{
 		"destination_name": destinationName,
 		"configmap_name":   configMapName,
@@ -297,7 +297,7 @@ func (m *destinationManager) probeDestinationEndpoint(ctx context.Context, reque
 			"probed":          false,
 			"reason":          "no recognized endpoint key in spec.data",
 			"considered_keys": endpointKeyCandidates,
-			"data_keys":       sortedKeys(destination.Spec.Data),
+			"data_keys":       sortedMapKeys(destination.Spec.Data),
 		})
 	}
 	probeResult := probeTCPAndTLS(ctx, endpoint)
@@ -389,15 +389,8 @@ func probeTCPAndTLS(ctx context.Context, endpoint string) map[string]any {
 		return result
 	}
 
-	// TLS verification can fail two ways the LLM must distinguish:
-	//   (a) handshake itself fails - destination is not actually a TLS server
-	//       on this port, or the server presents a malformed/expired cert.
-	//   (b) handshake succeeds but cert chain is untrusted - common with
-	//       self-signed or private-CA destinations in enterprise setups.
-	// We do a strict handshake first; on failure that looks like a verify
-	// error we retry with InsecureSkipVerify so we can report `tls_handshake_ok`
-	// independently of `tls_verified`. The TCP conn from above is consumed by
-	// the first attempt, so the retry dials again with a fresh conn.
+	// Strict handshake first; retry insecure on failure so we can split
+	// "not a TLS server / bad cert" from "untrusted chain" in the result.
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		deadline = time.Now().Add(destinationProbeTimeout)
@@ -419,7 +412,6 @@ func probeTCPAndTLS(ctx context.Context, endpoint string) map[string]any {
 		state := tlsClient.ConnectionState()
 		result["tls_handshake_ok"] = true
 		result["tls_verified"] = true
-		result["tls_ok"] = true // backwards-compat field
 		result["tls_elapsed_ms"] = tlsElapsed
 		result["tls_version"] = tlsVersionString(state.Version)
 		result["tls_cipher_suite"] = tls.CipherSuiteName(state.CipherSuite)
@@ -466,7 +458,6 @@ func probeTCPAndTLS(ctx context.Context, endpoint string) map[string]any {
 	state := insecureClient.ConnectionState()
 	result["tls_handshake_ok"] = true
 	result["tls_verified"] = false
-	result["tls_ok"] = false
 	result["tls_verify_error"] = strictErr.Error()
 	result["tls_elapsed_ms"] = tlsElapsed + time.Since(insecureStart).Milliseconds()
 	result["tls_version"] = tlsVersionString(state.Version)
@@ -625,16 +616,7 @@ func findPipelinesUsingExporters(parsed map[string]any, matchedExporters []strin
 	return result
 }
 
-func keysOfAnyMap(values map[string]any) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func sortedKeys(values map[string]string) []string {
+func sortedMapKeys[V any](values map[string]V) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
