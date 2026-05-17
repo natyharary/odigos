@@ -10,10 +10,8 @@ import (
 	"github.com/odigos-io/odigos-agent/mcp/tools"
 )
 
-// New builds the cluster MCP HTTP server. Phase 1 wires real cluster-state
-// tools alongside the phase-0 `cluster_ping` smoke tool. Tool groups are
-// added in this order: ping, source/instrumentation, (collector / destination
-// / citation follow in later commits).
+// New builds the cluster MCP HTTP server with the full tool surface:
+// ping, source/instrumentation, collector, destination, citation.
 func New() (*mcpserver.StreamableHTTPServer, error) {
 	mcpServer := mcpserver.NewMCPServer(
 		"odigos-agent-cluster-mcp",

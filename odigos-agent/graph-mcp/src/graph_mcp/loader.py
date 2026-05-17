@@ -1,8 +1,8 @@
 """Load the bundled Graphify artifact at startup.
 
-Phase 1d loads the full NetworkX graph plus the community-label map and the
-GRAPH_REPORT's hub-ordering. Wiki content is read lazily on demand via an
-LRU-cached helper so the steady-state memory footprint stays small.
+Loads the full NetworkX graph plus the community-label map and the
+GRAPH_REPORT's hub-ordering. Wiki content is read lazily on demand via
+an LRU-cached helper so the steady-state memory footprint stays small.
 """
 
 from __future__ import annotations

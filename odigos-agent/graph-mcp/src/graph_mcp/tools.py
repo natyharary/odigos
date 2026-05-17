@@ -1,9 +1,6 @@
-"""MCP tools exposed by graph-mcp.
-
-Phase 0 shipped `graph_ping` and `graph_metadata`. Phase 1d adds the
-diagnostic-graph surface: search, neighbors, shortest path, community
-inspection, god-nodes, community listing, wiki read.
-"""
+"""MCP tools exposed by graph-mcp: ping, metadata, search, neighbors,
+shortest path, community inspection, god-nodes, community listing,
+wiki read."""
 
 from __future__ import annotations
 

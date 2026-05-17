@@ -2,13 +2,13 @@
 
 Two subcommands:
 
-- `ping` (default, kept from Phase 0): a one-shot ReAct loop bound to the
-  merged MCP tool catalog. Used as a smoke test that both MCPs are reachable
-  and tool calls round-trip.
-- `debug --namespace --kind --name`: runs the Phase 2 diagnostic LangGraph
-  against a workload and prints the final Report as JSON. The graph stops
-  after proposing a mutation (status=pending_approval); Phase 3 will resume
-  it after a human approves.
+- `ping` (default): one-shot ReAct loop bound to the merged MCP tool
+  catalog. Smoke test that both MCPs are reachable and tool calls
+  round-trip.
+- `debug --namespace --kind --name`: runs the diagnostic LangGraph
+  against a workload and prints the final Report as JSON. The graph
+  stops after proposing a mutation (status=pending_approval); the API
+  layer resumes it after a human approves.
 """
 
 from __future__ import annotations

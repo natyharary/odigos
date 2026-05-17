@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -46,6 +45,6 @@ func main() {
 		if err := httpServer.Shutdown(ctx); err != nil {
 			log.Fatalf("shutdown error: %v", err)
 		}
-		fmt.Println("bye")
+		log.Printf("shutdown complete")
 	}
 }
