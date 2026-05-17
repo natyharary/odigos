@@ -61,8 +61,11 @@ resolve_token() {
     printf '%s' "${ODIGOS_AGENT_TOKEN}"
     return
   fi
+  # Don't swallow kubectl errors - missing-secret is the most common
+  # first-run failure and the underlying "secrets not found" message
+  # tells the user exactly which name to pass via TOKEN_SECRET=.
   kubectl -n "${AGENT_NAMESPACE}" get secret "${TOKEN_SECRET}" \
-    -o jsonpath='{.data.ODIGOS_AGENT_TOKEN}' 2>/dev/null | base64 -d
+    -o jsonpath='{.data.ODIGOS_AGENT_TOKEN}' | base64 -d
 }
 
 start_port_forward() {
@@ -109,6 +112,17 @@ run_scenario() {
   workload_name=$(jq -r '.workload.name' "${dir}/expected.json")
 
   log "scenario: ${scenario}"
+
+  # A scenario can take minutes between apply and /debug; in the
+  # meantime kubectl port-forward sometimes gets reaped by a transient
+  # API-server blip. Re-probe before each scenario so a dead tunnel
+  # surfaces as a port-forward error, not a confusing /debug failure.
+  if ! curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+    log "port-forward unhealthy, restarting"
+    stop_port_forward
+    start_port_forward "${PORT}"
+  fi
+
   log "applying manifests"
   bash "${dir}/apply.sh"
 
@@ -128,9 +142,12 @@ run_scenario() {
     return 1
   fi
 
-  # Pull the data line that follows `event: report`. Fall back to the
-  # last `data:` line if the stream ended mid-flight.
+  # Pull the data line that follows `event: report`. sse-starlette emits
+  # CRLF-terminated lines (DEFAULT_SEPARATOR = "\r\n"), so strip a
+  # trailing \r before matching - otherwise `event: report\r` never
+  # matches `^event: report$` and the runner reports "no report event".
   report="$(awk '
+    { sub(/\r$/, "") }
     /^event: report$/ { want=1; next }
     want && /^data:/ { sub(/^data: ?/, ""); print; want=0 }
   ' "${raw_log}")"
