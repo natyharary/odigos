@@ -119,12 +119,7 @@ def make_step(phase: str, action: str, detail: dict | None = None) -> StepLogEnt
 
 
 class AgentState(TypedDict, total=False):
-    """LangGraph state.
-
-    `step_log` carries an `operator.add` reducer so parallel subgraph nodes
-    (when triage classifies the symptom as "ambiguous") can each contribute
-    entries without overwriting one another.
-    """
+    """LangGraph state."""
 
     input_workload: WorkloadInput
     triage: TriageResult | None

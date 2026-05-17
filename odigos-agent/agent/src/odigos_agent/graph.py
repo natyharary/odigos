@@ -1,14 +1,11 @@
 """LangGraph diagnostic workflow.
 
-Triage classifies the symptom, then the matching subgraph(s) run as small
-ReAct loops bound to their domain's MCP tools. The synthesize stage merges
-the per-domain Findings into a single structured Report.
-
-Phase 2 only PROPOSES mutations - it never applies. If the source subgraph
-calls `propose_create_source`, the resulting request_id + yaml + diff is
-captured into `state.proposed_remediation` with `status=pending_approval`,
-and execution continues to synthesis. Phase 3 adds the interrupt/resume
-machinery for human approval and the subsequent `apply_create_source` call.
+Triage classifies the symptom, then the matching subgraph(s) run as
+small ReAct loops bound to their domain's MCP tools. The source subgraph
+may call `propose_create_source`; the apply_remediation node then either
+pauses on interrupt() for human approval (API mode) or leaves the
+proposal at `pending_approval` (CLI mode). The synthesize stage merges
+per-domain Findings into a single Report.
 """
 
 from __future__ import annotations
@@ -46,11 +43,10 @@ from .state import (
 DEFAULT_MODEL = "claude-sonnet-4-5"
 
 
-# Tool-name partitioning. Source intentionally omits `apply_create_source` -
-# Phase 2 stops at the proposal; Phase 3 wires up the actual apply behind a
-# human approval. Triage uses a small subset of source tools so the cheap
-# initial probe doesn't pull collector / destination clients into the
-# prompt's tool catalog.
+# Tool-name partitioning. Source omits `apply_create_source` - that
+# only runs from apply_remediation_node after a human approves. Triage
+# uses a small subset of source tools so the cheap initial probe doesn't
+# pull collector / destination clients into the prompt's tool catalog.
 
 _TRIAGE_TOOL_NAMES = frozenset({
     "get_source",
@@ -195,11 +191,9 @@ def _tool_message_text(message: ToolMessage) -> str | None:
 def _extract_proposed_remediation(messages: list[Any]) -> ProposedRemediation | None:
     """Walk back through ReAct messages for a successful propose_create_source.
 
-    Phase 2's only mutation surface is create_source. We only honor the most
-    recent successful proposal - if the LLM re-proposed (which the prompt
-    forbids), the last one wins. Failed proposals (`status == "error"`) are
-    skipped so a transient k8s error doesn't masquerade as a pending
-    approval in the final report.
+    Honors the most recent successful proposal (LLM is told to propose
+    once; if it re-proposes, the last one wins). Skips error proposals
+    so a transient k8s error doesn't masquerade as a pending approval.
     """
     for message in reversed(messages):
         if not isinstance(message, ToolMessage):
@@ -233,12 +227,11 @@ def _override_remediation_from_state(
 ) -> Report:
     """Force `report.proposed_remediation` to match `state.proposed_remediation`.
 
-    The synthesizer is an `llm.with_structured_output(Report)` call and the
-    LLM can ignore the prompt instruction to leave the field null. Trusting
-    the model here would let a hallucinated `request_id` reach the UI and
-    Phase 3 approval modal, where it would 404 on apply. The MCP's approval
-    cache is the single source of truth for which mutations actually exist
-    - this helper enforces that boundary unconditionally.
+    The synthesizer is `llm.with_structured_output(Report)` and the LLM
+    can ignore the "leave it null" instruction. A hallucinated
+    request_id would 404 on apply. The MCP's approval cache is the only
+    source of truth for which mutations actually exist; this helper
+    enforces that boundary.
     """
     return report.model_copy(
         update={"proposed_remediation": state.get("proposed_remediation")}
@@ -409,29 +402,21 @@ def build_graph(
                 )
         return update
 
-    async def source_node(state: AgentState) -> dict:
-        return await _run_subgraph(
-            source_agent,
-            state,
-            "source",
-            "Diagnose source / instrumentation issues.",
-        )
+    def _make_subgraph_node(agent: CompiledStateGraph, phase: str, hint: str):
+        async def node(state: AgentState) -> dict:
+            return await _run_subgraph(agent, state, phase, hint)
 
-    async def collector_node(state: AgentState) -> dict:
-        return await _run_subgraph(
-            collector_agent,
-            state,
-            "collector",
-            "Diagnose collector / gateway pipeline issues.",
-        )
+        return node
 
-    async def destination_node(state: AgentState) -> dict:
-        return await _run_subgraph(
-            destination_agent,
-            state,
-            "destination",
-            "Diagnose destination configuration issues.",
-        )
+    source_node = _make_subgraph_node(
+        source_agent, "source", "Diagnose source / instrumentation issues."
+    )
+    collector_node = _make_subgraph_node(
+        collector_agent, "collector", "Diagnose collector / gateway pipeline issues."
+    )
+    destination_node = _make_subgraph_node(
+        destination_agent, "destination", "Diagnose destination configuration issues."
+    )
 
     async def apply_remediation_node(
         state: AgentState, config: RunnableConfig
