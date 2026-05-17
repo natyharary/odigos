@@ -8,7 +8,6 @@ rules:
       - sources
       - instrumentationconfigs
       - instrumentationinstances
-      - instrumentationrules
       - destinations
       - collectorsgroups
       - processors
@@ -18,6 +17,14 @@ rules:
   - apiGroups: ["odigos.io"]
     resources: ["sources"]
     verbs: ["create"]
+
+  # Phase 7: instrumentationrules - read for diagnosis, create/update/patch
+  # for the override_distro / enable_obi / disable_obi mutations (each still
+  # gated by user approval). No `delete` - rollback is manual `kubectl delete`.
+  # See ADR-017.
+  - apiGroups: ["odigos.io"]
+    resources: ["instrumentationrules"]
+    verbs: ["get", "list", "create", "update", "patch"]
 
   - apiGroups: [""]
     resources:

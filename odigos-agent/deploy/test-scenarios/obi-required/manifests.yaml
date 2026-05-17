@@ -1,0 +1,72 @@
+# Scenario: a C++ workload with a Source CR. odigos has no first-class
+# C++ SDK distro registered (see distros/yamls/ - no cpp entry in the
+# community defaulter map), so the language SDK path can never attach.
+# OBI / eBPF (`opentelemetry-ebpf-instrumentation`) is the only viable
+# instrumentation path. The agent should observe (a) Source exists and
+# odigos has detected language=cplusplus on at least one container,
+# (b) no community SDK distro is registered for cpp, and (c) the
+# universal eBPF distro exists - and propose `enable_obi`.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-cpp
+  namespace: odigos-agent-test
+  labels:
+    app: demo-cpp
+    odigos.io/agent-test: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-cpp
+  template:
+    metadata:
+      labels:
+        app: demo-cpp
+    spec:
+      containers:
+        - name: demo
+          # Official gcc image; compiles a tiny C++ loop inline so the
+          # detected runtime is a native ELF + g++ runtime libs - which
+          # odigos's language detection classifies as cplusplus.
+          image: gcc:13
+          command:
+            - sh
+            - -c
+            - |
+              cat > /tmp/sleep.cpp <<'EOF'
+              #include <chrono>
+              #include <thread>
+              int main() {
+                while (true) std::this_thread::sleep_for(std::chrono::seconds(60));
+              }
+              EOF
+              g++ -O2 -o /tmp/sleep /tmp/sleep.cpp && exec /tmp/sleep
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: odigos.io/v1alpha1
+kind: Source
+metadata:
+  name: source-demo-cpp
+  namespace: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+spec:
+  workload:
+    name: demo-cpp
+    namespace: odigos-agent-test
+    kind: Deployment

@@ -190,3 +190,13 @@ lands.
 **Decision (button placement).** The button lives as a floating fixed-position overlay (`frontend/webapp/components/ai-agent/fix-with-ai-button.tsx`) that appears only when `useDrawerStore().drawerType === EntityTypes.Source`. `SourceDrawer` ships from `@odigos/ui-kit` with no extension slots, and forking the package for a single CTA would couple the agent feature to upstream release cadence. The button reads the currently-selected workload from the ui-kit drawer store and opens an independent `AgentDiagnosticsPanel` (also a fixed-position sibling). When the ui-kit eventually exposes a drawer-extension slot, migrate the button into it and delete the floating shim.
 
 **Consequences.** No ui-kit fork. The SSE parser duplicates a small amount of logic that `EventSource` would otherwise provide for free (under 50 lines). Helm exposes `ui.aiAgent.{url, tokenSecret}` so the UI deployment can reference the agent chart's token secret without the two charts being merged - matches ADR-014's "standalone chart now, fold-in later."
+
+---
+
+## ADR-017 - Phase 7 widens RBAC on `instrumentationrules` to create/update/patch, no delete
+
+**Context.** Phase 7 adds three new mutations - `override_distro`, `enable_obi`, `disable_obi` - all of which target `odigos.io/instrumentationrules`. Phase 4 only granted `get`/`list` on that resource (ADR-015). The agent now needs to create new rules and patch existing ones.
+
+**Decision.** Split the `instrumentationrules` row out of the bulk read-only rule in `clusterrole.yaml` and grant `get`, `list`, `create`, `update`, `patch` (and only those verbs). `delete` is deliberately omitted. `disable_obi` does NOT delete the workload-scoped rule when reverting from OBI to the SDK default - it rewrites `spec.otelDistros.otelDistroNames` to the default distro name so a user can read the rule and see the explicit fallback. Rollback is a manual `kubectl delete` issued by the user from the rollback hint in the report.
+
+**Consequences.** Smaller blast radius than `*` - a compromised agent cannot drop user-authored rules. Rules created by the agent carry the `odigos-agent-` name prefix and a `Notes` field documenting the op + workload, so they're easy to recognise. If a future op truly needs `delete` (e.g. "undo all agent-created rules in a namespace"), it lands together with an explicit ADR widening RBAC. Audit log lines (`audit: op=apply_*`) record every create/patch via the Phase 1a `log.Printf` mechanism (ADR-008); OTLP remains the future direction.

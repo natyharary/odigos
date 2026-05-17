@@ -39,7 +39,7 @@ TOKEN_SECRET="${TOKEN_SECRET:-odigos-ai-agent-token}"
 AGENT_SERVICE="${AGENT_SERVICE:-odigos-ai-agent}"
 AGENT_NAMESPACE="${AGENT_NAMESPACE:-odigos-system}"
 
-ALL_SCENARIOS=(source-missing destination-broken collector-broken)
+ALL_SCENARIOS=(source-missing destination-broken collector-broken wrong-distro obi-required)
 
 color() {
   local code="$1"; shift

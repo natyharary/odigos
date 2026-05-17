@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import operator
 import time
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -40,6 +40,14 @@ RemediationStatus = Literal[
     "denied",
     "timed_out",
     "failed",
+]
+
+
+RemediationOp = Literal[
+    "create_source",
+    "override_distro",
+    "enable_obi",
+    "disable_obi",
 ]
 
 
@@ -75,18 +83,23 @@ class Finding(BaseModel):
 class ProposedRemediation(BaseModel):
     """A pending or resolved mutation proposal.
 
-    Phase 2 only produces `status="pending_approval"`. Phase 3 will resume
-    the graph after a user approve/deny decision and update `status` +
-    `result` accordingly.
+    Phase 2 introduced `create_source` as the only op (populates `yaml`).
+    Phase 7 adds `override_distro`, `enable_obi`, `disable_obi` - all patch
+    or create an `InstrumentationRule` so they populate `yaml_before` /
+    `yaml_after` instead. `context` carries op-specific structured fields
+    the UI surfaces alongside the diff (language, from/to distro names).
     """
 
-    op: Literal["create_source"]
+    op: RemediationOp
     request_id: str
-    yaml: str
+    yaml: str = ""
+    yaml_before: str = ""
+    yaml_after: str = ""
     diff: str
     rollback_command: str
     status: RemediationStatus = "pending_approval"
     result: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class Report(BaseModel):

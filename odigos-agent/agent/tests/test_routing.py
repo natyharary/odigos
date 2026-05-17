@@ -126,3 +126,28 @@ def test_partition_excludes_apply_create_source():
     source_names = {tool.name for tool in partitioned["source"]}
     assert "propose_create_source" in source_names
     assert "apply_create_source" not in source_names
+
+
+def test_partition_includes_phase7_propose_tools_excludes_phase7_apply_tools():
+    """Phase 7 adds three new propose/apply pairs. The propose_* tools must
+    reach the source subgraph; the apply_* tools must not, so the approval
+    gate keeps its monopoly on cluster writes."""
+    tools = [
+        _make_stub("list_available_distros"),
+        _make_stub("get_workload_distro"),
+        _make_stub("check_obi_eligibility"),
+        _make_stub("propose_override_distro"),
+        _make_stub("apply_override_distro"),
+        _make_stub("propose_enable_obi"),
+        _make_stub("apply_enable_obi"),
+        _make_stub("propose_disable_obi"),
+        _make_stub("apply_disable_obi"),
+    ]
+    partitioned = partition_tools(tools)
+    source_names = {tool.name for tool in partitioned["source"]}
+    for read_tool in ("list_available_distros", "get_workload_distro", "check_obi_eligibility"):
+        assert read_tool in source_names
+    for propose_tool in ("propose_override_distro", "propose_enable_obi", "propose_disable_obi"):
+        assert propose_tool in source_names
+    for apply_tool_name in ("apply_override_distro", "apply_enable_obi", "apply_disable_obi"):
+        assert apply_tool_name not in source_names

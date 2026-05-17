@@ -58,14 +58,23 @@ func OdigosNamespace() string { return env.GetCurrentNamespace() }
 // user approval via apply_*. Fields are deliberately concrete - the agent
 // rebuilds the runtime object from these on apply rather than trusting cached
 // bytes.
+//
+// create_source (greenfield): populates YAML only.
+// override_distro / enable_obi / disable_obi (patch existing rule, or create
+// a new workload-scoped rule): populate YAMLBefore + YAMLAfter. Context
+// carries op-specific structured data (language, from/to distro names, etc.)
+// that the UI surfaces alongside the diff.
 type PendingMutation struct {
 	Operation    string
 	Namespace    string
 	WorkloadKind string
 	WorkloadName string
 	YAML         string
+	YAMLBefore   string
+	YAMLAfter    string
 	Diff         string
 	RollbackHint string
+	Context      map[string]any
 	CreatedAt    time.Time
 }
 

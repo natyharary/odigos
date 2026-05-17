@@ -1,0 +1,100 @@
+# Scenario: Java workload deliberately pinned to the universal eBPF distro
+# via an InstrumentationRule. The Java SDK distro (`java-community`) is
+# the standard choice for this language; the eBPF pin is a misconfiguration
+# the agent should propose to override.
+#
+# The Source CR is pre-created so odigos runs runtime detection on the pod
+# (language=java). The InstrumentationRule pins the workload-scoped distro
+# to `opentelemetry-ebpf-instrumentation`. The agent's source subgraph
+# should observe (a) language=java detected, (b) distro pinned to the
+# wildcard eBPF distro via the workload-scoped rule, and (c) a language-
+# native SDK distro exists in list_available_distros - and therefore
+# propose `override_distro` back to `java-community`.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-java
+  namespace: odigos-agent-test
+  labels:
+    app: demo-java
+    odigos.io/agent-test: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-java
+  template:
+    metadata:
+      labels:
+        app: demo-java
+    spec:
+      containers:
+        - name: demo
+          # Slim official Eclipse Temurin JDK; runs a no-op Java process so
+          # odigos can detect language=java without a heavy framework.
+          image: eclipse-temurin:21-jdk-alpine
+          command:
+            - sh
+            - -c
+            - |
+              cat > /tmp/Sleep.java <<'EOF'
+              public class Sleep {
+                public static void main(String[] args) throws Exception {
+                  while (true) { Thread.sleep(60000); }
+                }
+              }
+              EOF
+              cd /tmp && javac Sleep.java && exec java Sleep
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 384Mi
+---
+apiVersion: odigos.io/v1alpha1
+kind: Source
+metadata:
+  name: source-demo-java
+  namespace: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+spec:
+  workload:
+    name: demo-java
+    namespace: odigos-agent-test
+    kind: Deployment
+---
+apiVersion: odigos.io/v1alpha1
+kind: InstrumentationRule
+metadata:
+  # Deliberate user-authored name: distinct from the `odigos-agent-` prefix
+  # the agent uses so the agent will create a separate workload-scoped rule
+  # rather than patch this one. This mirrors a real misconfiguration where
+  # the user pinned the wrong distro by hand.
+  name: misconfigured-java-ebpf
+  namespace: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+spec:
+  ruleName: misconfigured-java-ebpf
+  notes: |
+    Test fixture: deliberately pins the Java demo workload to the universal
+    eBPF distro. The odigos-ai-agent should diagnose this and propose
+    overriding back to java-community.
+  workloads:
+    - name: demo-java
+      namespace: odigos-agent-test
+      kind: Deployment
+  otelDistros:
+    otelDistroNames:
+      - opentelemetry-ebpf-instrumentation

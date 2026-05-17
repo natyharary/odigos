@@ -229,12 +229,16 @@ async def _run_debug_session(
                 yield ev.error("interrupt missing request_id")
             else:
                 await approvals.register(session_id, request_id)
+                context_value = pending_interrupt.get("context")
                 yield ev.approval_required(
                     request_id=request_id,
                     op=str(pending_interrupt.get("op", "")),
                     yaml=str(pending_interrupt.get("yaml", "")),
+                    yaml_before=str(pending_interrupt.get("yaml_before", "")),
+                    yaml_after=str(pending_interrupt.get("yaml_after", "")),
                     diff=str(pending_interrupt.get("diff", "")),
                     rollback_command=str(pending_interrupt.get("rollback_command", "")),
+                    context=context_value if isinstance(context_value, dict) else None,
                 )
                 decision = await approvals.wait(
                     session_id, request_id, timeout=APPROVAL_TIMEOUT_SECONDS

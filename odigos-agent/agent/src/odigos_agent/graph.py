@@ -64,7 +64,29 @@ _SOURCE_TOOL_NAMES = frozenset({
     "get_odiglet_logs_for_node",
     "list_instrumentation_rules",
     "propose_create_source",
+    # Phase 7 distro/OBI tools - propose_* exposed to the agent; apply_*
+    # stays out of the agent catalog and runs from apply_remediation_node.
+    "list_available_distros",
+    "get_workload_distro",
+    "check_obi_eligibility",
+    "propose_override_distro",
+    "propose_enable_obi",
+    "propose_disable_obi",
 })
+
+_PROPOSE_TOOLS_BY_OP: dict[str, str] = {
+    "create_source": "propose_create_source",
+    "override_distro": "propose_override_distro",
+    "enable_obi": "propose_enable_obi",
+    "disable_obi": "propose_disable_obi",
+}
+
+_APPLY_TOOLS_BY_OP: dict[str, str] = {
+    "create_source": "apply_create_source",
+    "override_distro": "apply_override_distro",
+    "enable_obi": "apply_enable_obi",
+    "disable_obi": "apply_disable_obi",
+}
 
 _COLLECTOR_TOOL_NAMES = frozenset({
     "get_collectors_group",
@@ -188,17 +210,25 @@ def _tool_message_text(message: ToolMessage) -> str | None:
     return None
 
 
+_PROPOSE_TOOL_NAMES: frozenset[str] = frozenset(_PROPOSE_TOOLS_BY_OP.values())
+
+
 def _extract_proposed_remediation(messages: list[Any]) -> ProposedRemediation | None:
-    """Walk back through ReAct messages for a successful propose_create_source.
+    """Walk back through ReAct messages for a successful propose_* tool call.
 
     Honors the most recent successful proposal (LLM is told to propose
     once; if it re-proposes, the last one wins). Skips error proposals
     so a transient k8s error doesn't masquerade as a pending approval.
+
+    The `op` literal returned by the MCP determines the schema of the
+    payload. `create_source` populates `yaml` (greenfield); the Phase 7
+    ops populate `yaml_before` / `yaml_after`.
     """
     for message in reversed(messages):
         if not isinstance(message, ToolMessage):
             continue
-        if getattr(message, "name", None) != "propose_create_source":
+        tool_name = getattr(message, "name", None)
+        if tool_name not in _PROPOSE_TOOL_NAMES:
             continue
         if getattr(message, "status", "success") == "error":
             continue
@@ -211,15 +241,32 @@ def _extract_proposed_remediation(messages: list[Any]) -> ProposedRemediation | 
             continue
         if not isinstance(data, dict) or "request_id" not in data:
             continue
+        op = data.get("op")
+        if op not in _PROPOSE_TOOLS_BY_OP:
+            continue
         return ProposedRemediation(
-            op="create_source",
+            op=op,
             request_id=str(data["request_id"]),
             yaml=str(data.get("yaml", "")),
+            yaml_before=str(data.get("yaml_before", "")),
+            yaml_after=str(data.get("yaml_after", "")),
             diff=str(data.get("diff", "")),
             rollback_command=str(data.get("rollback_command", "")),
             status="pending_approval",
+            context=_coerce_context(data.get("context")),
         )
     return None
+
+
+def _coerce_context(value: Any) -> dict[str, Any]:
+    """Best-effort coerce a tool's context payload into a plain dict.
+
+    MCPs return JSON, so anything non-dict here is a contract bug -
+    silently degrade to an empty dict so callers stay defensive.
+    """
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
 
 
 def _override_remediation_from_state(
@@ -311,10 +358,12 @@ def build_graph(
     """
     llm = ChatAnthropic(model=model, max_tokens=max_tokens)
     partitioned = partition_tools(tools)
-    apply_tool = next(
-        (tool for tool in tools if tool.name == "apply_create_source"),
-        None,
-    )
+    by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools}
+    apply_tools: dict[str, BaseTool] = {
+        op: by_name[apply_name]
+        for op, apply_name in _APPLY_TOOLS_BY_OP.items()
+        if apply_name in by_name
+    }
 
     triage_agent = create_react_agent(
         llm,
@@ -452,8 +501,11 @@ def build_graph(
                 "request_id": proposed.request_id,
                 "op": proposed.op,
                 "yaml": proposed.yaml,
+                "yaml_before": proposed.yaml_before,
+                "yaml_after": proposed.yaml_after,
                 "diff": proposed.diff,
                 "rollback_command": proposed.rollback_command,
+                "context": proposed.context,
             }
         )
         decision = _coerce_decision(decision_payload)
@@ -466,18 +518,20 @@ def build_graph(
         ]
 
         if decision == "approve":
+            apply_tool = apply_tools.get(proposed.op)
             if apply_tool is None:
+                expected = _APPLY_TOOLS_BY_OP.get(proposed.op, f"apply_{proposed.op}")
                 updated = proposed.model_copy(
                     update={
                         "status": "failed",
-                        "result": "apply_create_source tool not available",
+                        "result": f"{expected} tool not available",
                     }
                 )
                 log_entries.append(
                     make_step(
                         "apply_remediation",
-                        "failed: apply tool missing",
-                        {"request_id": proposed.request_id},
+                        f"failed: {expected} missing",
+                        {"request_id": proposed.request_id, "op": proposed.op},
                     )
                 )
                 return {"proposed_remediation": updated, "step_log": log_entries}
@@ -495,7 +549,7 @@ def build_graph(
                     make_step(
                         "apply_remediation",
                         "applied",
-                        {"request_id": proposed.request_id},
+                        {"request_id": proposed.request_id, "op": proposed.op},
                     )
                 )
             except Exception as exc:  # noqa: BLE001 - record the failure verbatim
@@ -508,6 +562,7 @@ def build_graph(
                         "apply raised",
                         {
                             "request_id": proposed.request_id,
+                            "op": proposed.op,
                             "error": type(exc).__name__,
                         },
                     )

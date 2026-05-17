@@ -66,6 +66,22 @@ const Diff = styled(Pre)`
   background: rgba(20, 60, 30, 0.25);
 `;
 
+const Callout = styled.div`
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(80, 140, 220, 0.12);
+  border: 1px solid rgba(80, 140, 220, 0.35);
+  color: rgba(220, 235, 255, 0.9);
+  font-size: 12px;
+  line-height: 1.45;
+`;
+
+const YamlPair = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
 const CopyBox = styled.div`
   display: flex;
   align-items: stretch;
@@ -155,6 +171,9 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
     }
   };
 
+  const callout = buildCallout(approval);
+  const showBeforeAfter = approval.op !== 'create_source' && (approval.yaml_before || approval.yaml_after);
+
   return (
     <Backdrop>
       <Modal>
@@ -163,10 +182,25 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
           <Subtitle>The agent wants to apply a change. Review below before continuing.</Subtitle>
         </div>
 
-        <div>
-          <SectionTitle>YAML</SectionTitle>
-          <Pre>{approval.yaml || '(empty)'}</Pre>
-        </div>
+        {callout && <Callout>{callout}</Callout>}
+
+        {showBeforeAfter ? (
+          <YamlPair>
+            <div>
+              <SectionTitle>Before</SectionTitle>
+              <Pre>{approval.yaml_before || '(no existing InstrumentationRule)'}</Pre>
+            </div>
+            <div>
+              <SectionTitle>After</SectionTitle>
+              <Pre>{approval.yaml_after || '(empty)'}</Pre>
+            </div>
+          </YamlPair>
+        ) : (
+          <div>
+            <SectionTitle>YAML</SectionTitle>
+            <Pre>{approval.yaml || '(empty)'}</Pre>
+          </div>
+        )}
 
         {approval.diff && (
           <div>
@@ -220,5 +254,34 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
     </Backdrop>
   );
 };
+
+// buildCallout renders a short, op-specific explanation above the YAML view.
+// `create_source` is greenfield and self-explanatory from the YAML alone, so
+// no callout is shown. The other ops carry structured context from the MCP
+// (language, from/to distro) which is much more readable here than in the
+// raw diff.
+function buildCallout(approval: ApprovalRequiredData): string | null {
+  const context = (approval.context || {}) as Record<string, string>;
+  switch (approval.op) {
+    case 'override_distro': {
+      const language = context.language || 'workload';
+      const from = context.from_distro || '(unknown)';
+      const to = context.to_distro || '(unknown)';
+      return `Changing ${language} distro from ${from} → ${to}.`;
+    }
+    case 'enable_obi': {
+      const language = context.language || 'workload';
+      const ebpf = context.ebpf_distro_name || '(unknown)';
+      return `Will switch the ${language} workload to eBPF-based instrumentation (${ebpf}). Pods may need a restart for the change to take effect.`;
+    }
+    case 'disable_obi': {
+      const removed = context.removed_distro || '(unknown)';
+      const restored = context.restored_to || '(unknown)';
+      return `Will revert OBI (${removed}) and use the language SDK (${restored}).`;
+    }
+    default:
+      return null;
+  }
+}
 
 export { ApprovalModal };

@@ -80,17 +80,25 @@ def approval_required(
     yaml: str,
     diff: str,
     rollback_command: str,
+    *,
+    yaml_before: str = "",
+    yaml_after: str = "",
+    context: dict[str, Any] | None = None,
 ) -> SSEEvent:
-    return SSEEvent(
-        "approval_required",
-        {
-            "request_id": request_id,
-            "op": op,
-            "yaml": yaml,
-            "diff": diff,
-            "rollback_command": rollback_command,
-        },
-    )
+    payload: dict[str, Any] = {
+        "request_id": request_id,
+        "op": op,
+        "yaml": yaml,
+        "diff": diff,
+        "rollback_command": rollback_command,
+    }
+    if yaml_before:
+        payload["yaml_before"] = yaml_before
+    if yaml_after:
+        payload["yaml_after"] = yaml_after
+    if context:
+        payload["context"] = context
+    return SSEEvent("approval_required", payload)
 
 
 def approval_resolved(

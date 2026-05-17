@@ -1,0 +1,11 @@
+{
+  "scenario": "wrong-distro",
+  "workload": {
+    "namespace": "odigos-agent-test",
+    "kind": "Deployment",
+    "name": "demo-java"
+  },
+  "expected_root_cause": "source_not_instrumented",
+  "expects_proposed_remediation": true,
+  "expected_remediation_op": "override_distro"
+}

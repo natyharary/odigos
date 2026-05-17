@@ -628,12 +628,19 @@ func matchNamespaceSource(items []odigosv1.Source, namespace string) *odigosv1.S
 }
 
 // fetchPodTemplate returns the pod template, label selector string, and owner
+// references for a workload. Thin wrapper over the package-level FetchPodTemplate
+// so existing callers on sourceManager keep working.
+func (m *sourceManager) fetchPodTemplate(ctx context.Context, namespace, kind, name string) (*corev1.PodTemplateSpec, string, []metav1.OwnerReference, error) {
+	return FetchPodTemplate(ctx, m.clients, namespace, kind, name)
+}
+
+// FetchPodTemplate returns the pod template, label selector string, and owner
 // references for a workload. The selector is k8s-list-friendly (e.g.
 // "app=foo,role=bar"). Errors from the underlying k8s API bubble up unchanged
 // so callers can spot apierrors.IsNotFound.
-func (m *sourceManager) fetchPodTemplate(ctx context.Context, namespace, kind, name string) (*corev1.PodTemplateSpec, string, []metav1.OwnerReference, error) {
-	apps := m.clients.Core.AppsV1()
-	batch := m.clients.Core.BatchV1()
+func FetchPodTemplate(ctx context.Context, clients *Clients, namespace, kind, name string) (*corev1.PodTemplateSpec, string, []metav1.OwnerReference, error) {
+	apps := clients.Core.AppsV1()
+	batch := clients.Core.BatchV1()
 	switch k8sconsts.WorkloadKind(kind) {
 	case k8sconsts.WorkloadKindDeployment:
 		deployment, err := apps.Deployments(namespace).Get(ctx, name, metav1.GetOptions{})

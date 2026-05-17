@@ -7,6 +7,7 @@ require (
 	github.com/mark3labs/mcp-go v0.54.0
 	github.com/odigos-io/odigos/api v0.0.0
 	github.com/odigos-io/odigos/common v0.0.0
+	github.com/odigos-io/odigos/distros v1.26.0
 	github.com/odigos-io/odigos/k8sutils v0.0.0-00010101000000-000000000000
 	k8s.io/api v0.35.2
 	k8s.io/apimachinery v0.35.2
@@ -64,6 +65,7 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
@@ -76,6 +78,8 @@ require (
 replace github.com/odigos-io/odigos/api => ../../api
 
 replace github.com/odigos-io/odigos/common => ../../common
+
+replace github.com/odigos-io/odigos/distros => ../../distros
 
 replace github.com/odigos-io/odigos/k8sutils => ../../k8sutils
 

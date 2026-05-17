@@ -30,6 +30,7 @@ from odigos_agent.state import (
     Classification,
     Finding,
     ProposedRemediation,
+    RemediationOp,
     RemediationStatus,
     Report,
     RootCause,
@@ -133,17 +134,95 @@ def test_root_cause_rejects_unknown_literal():
 # ---------------------------------------------------------------------------
 
 
-def test_proposed_remediation_op_locked_to_create_source():
-    """Phase 7 lifts this restriction. Until then, any drift in the
-    op vocabulary is a coordination bug between agent and UI."""
+@pytest.mark.parametrize(
+    "op",
+    ["create_source", "override_distro", "enable_obi", "disable_obi"],
+)
+def test_proposed_remediation_op_literals_accepted(op: str):
+    """Phase 7 expanded the mutation surface to four ops. All must
+    deserialize cleanly so a propose_* tool result lands in state with
+    its op preserved."""
+    ProposedRemediation(
+        op=op,
+        request_id="r",
+        diff="d",
+        rollback_command="c",
+    )
+
+
+def test_proposed_remediation_op_literals_locked():
+    """Adding a new op without coordinating the agent prompt, the MCP
+    tool catalog, the UI approval modal, and RBAC is a foot-gun. Pin
+    the literal set so any future addition is a deliberate ADR step."""
+    literals = typing.get_args(RemediationOp)
+    assert set(literals) == {
+        "create_source",
+        "override_distro",
+        "enable_obi",
+        "disable_obi",
+    }
+
+
+def test_proposed_remediation_rejects_unknown_op():
     with pytest.raises(ValidationError):
         ProposedRemediation(
-            op="override_distro",  # type: ignore[arg-type]
+            op="restart_workload",  # type: ignore[arg-type]
             request_id="r",
-            yaml="y",
             diff="d",
             rollback_command="c",
         )
+
+
+def test_proposed_remediation_create_source_uses_greenfield_yaml():
+    remediation = ProposedRemediation(
+        op="create_source",
+        request_id="r",
+        yaml="apiVersion: odigos.io/v1alpha1\nkind: Source\n",
+        diff="+ apiVersion: odigos.io/v1alpha1\n",
+        rollback_command="kubectl delete source ...",
+    )
+    assert remediation.yaml.startswith("apiVersion")
+    assert remediation.yaml_before == ""
+    assert remediation.yaml_after == ""
+
+
+def test_proposed_remediation_override_distro_uses_before_after_yaml():
+    remediation = ProposedRemediation(
+        op="override_distro",
+        request_id="r",
+        yaml_before="apiVersion: odigos.io/v1alpha1\nkind: InstrumentationRule\n",
+        yaml_after="apiVersion: odigos.io/v1alpha1\nkind: InstrumentationRule\nspec:\n  otelDistros:\n    otelDistroNames: [java-community]\n",
+        diff="+ spec:\n+   otelDistros:\n",
+        rollback_command="kubectl apply -f - <<EOF\n... EOF",
+        context={
+            "language": "java",
+            "from_distro": "java-legacy",
+            "to_distro": "java-community",
+        },
+    )
+    assert remediation.yaml == ""
+    assert "InstrumentationRule" in remediation.yaml_after
+    assert remediation.context["to_distro"] == "java-community"
+
+
+def test_proposed_remediation_enable_obi_context_round_trip():
+    remediation = ProposedRemediation(
+        op="enable_obi",
+        request_id="r",
+        yaml_before="",
+        yaml_after="apiVersion: odigos.io/v1alpha1\nkind: InstrumentationRule\n",
+        diff="+ kind: InstrumentationRule\n",
+        rollback_command="kubectl delete instrumentationrule ...",
+        context={
+            "language": "cplusplus",
+            "ebpf_distro_name": "opentelemetry-ebpf-instrumentation",
+            "prior_distro": "",
+        },
+    )
+    dumped = remediation.model_dump_json()
+    restored = ProposedRemediation.model_validate_json(dumped)
+    assert restored == remediation
+    assert restored.context["ebpf_distro_name"] == "opentelemetry-ebpf-instrumentation"
 
 
 @pytest.mark.parametrize(

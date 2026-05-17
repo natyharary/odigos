@@ -14,14 +14,23 @@ export type RemediationStatus =
   | 'timed_out'
   | 'failed';
 
+export type RemediationOp =
+  | 'create_source'
+  | 'override_distro'
+  | 'enable_obi'
+  | 'disable_obi';
+
 export interface ProposedRemediation {
-  op: string;
+  op: RemediationOp;
   request_id: string;
   yaml: string;
+  yaml_before?: string;
+  yaml_after?: string;
   diff: string;
   rollback_command: string;
   status: RemediationStatus;
   result: string | null;
+  context?: Record<string, unknown>;
 }
 
 export interface AgentReport {
@@ -34,10 +43,13 @@ export interface AgentReport {
 
 export interface ApprovalRequiredData {
   request_id: string;
-  op: string;
+  op: RemediationOp;
   yaml: string;
+  yaml_before?: string;
+  yaml_after?: string;
   diff: string;
   rollback_command: string;
+  context?: Record<string, unknown>;
 }
 
 export type ApprovalDecision = 'approve' | 'deny' | 'timed_out';
