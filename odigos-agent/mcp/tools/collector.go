@@ -30,9 +30,8 @@ const (
 	maxActionsListResult    = 200
 )
 
-// otelcolInterestingMetrics is the curated set we surface back to the agent.
-// Anything else from the collector's /metrics endpoint is ignored - the LLM
-// doesn't need the full prometheus exposition dump.
+// otelcolInterestingMetrics is the curated set surfaced to the agent;
+// everything else from the collector's /metrics endpoint is dropped.
 var otelcolInterestingMetrics = []string{
 	"otelcol_receiver_accepted_spans",
 	"otelcol_receiver_refused_spans",
@@ -305,7 +304,7 @@ func (m *collectorManager) getCollectorMetrics(ctx context.Context, request mcp.
 	if err != nil {
 		return ToolError("read scrape body: %v", err)
 	}
-	metrics := ParsePromCountersForNames(string(body), otelcolInterestingMetrics)
+	metrics := parsePromCountersForNames(string(body), otelcolInterestingMetrics)
 	return WriteJSON(map[string]any{
 		"found":      true,
 		"role":       role,
@@ -368,21 +367,36 @@ func readCollectorRole(request mcp.CallToolRequest) (string, error) {
 	return "", fmt.Errorf("role must be CLUSTER_GATEWAY or NODE_COLLECTOR, got %q", role)
 }
 
-// collectorResourceNames returns the (CollectorsGroup name, workload name) for
-// the role. Both happen to be the same string in v1, but isolating the lookup
-// keeps the call sites readable.
+type collectorCoordinates struct {
+	groupName     string
+	workloadName  string
+	configMapName string
+	configKey     string
+}
+
+var collectorCoordinatesByRole = map[k8sconsts.CollectorRole]collectorCoordinates{
+	k8sconsts.CollectorsRoleClusterGateway: {
+		groupName:     k8sconsts.OdigosClusterCollectorCollectorGroupName,
+		workloadName:  k8sconsts.OdigosClusterCollectorDeploymentName,
+		configMapName: k8sconsts.OdigosClusterCollectorConfigMapName,
+		configKey:     k8sconsts.OdigosClusterCollectorConfigMapKey,
+	},
+	k8sconsts.CollectorsRoleNodeCollector: {
+		groupName:     k8sconsts.OdigosNodeCollectorCollectorGroupName,
+		workloadName:  k8sconsts.OdigosNodeCollectorDaemonSetName,
+		configMapName: k8sconsts.OdigosNodeCollectorConfigMapName,
+		configKey:     k8sconsts.OdigosNodeCollectorConfigMapKey,
+	},
+}
+
 func collectorResourceNames(role string) (groupName string, workloadName string) {
-	if k8sconsts.CollectorRole(role) == k8sconsts.CollectorsRoleNodeCollector {
-		return k8sconsts.OdigosNodeCollectorCollectorGroupName, k8sconsts.OdigosNodeCollectorDaemonSetName
-	}
-	return k8sconsts.OdigosClusterCollectorCollectorGroupName, k8sconsts.OdigosClusterCollectorDeploymentName
+	c := collectorCoordinatesByRole[k8sconsts.CollectorRole(role)]
+	return c.groupName, c.workloadName
 }
 
 func collectorConfigCoordinates(role string) (configMapName string, configKey string) {
-	if k8sconsts.CollectorRole(role) == k8sconsts.CollectorsRoleNodeCollector {
-		return k8sconsts.OdigosNodeCollectorConfigMapName, k8sconsts.OdigosNodeCollectorConfigMapKey
-	}
-	return k8sconsts.OdigosClusterCollectorConfigMapName, k8sconsts.OdigosClusterCollectorConfigMapKey
+	c := collectorCoordinatesByRole[k8sconsts.CollectorRole(role)]
+	return c.configMapName, c.configKey
 }
 
 func collectorRoleLabelSelector(role string) string {
@@ -468,11 +482,11 @@ func filterLinesByRegex(text string, pattern *regexp.Regexp) string {
 	return strings.Join(matched, "\n")
 }
 
-// ParsePromCountersForNames parses a Prometheus text-exposition body and
+// parsePromCountersForNames parses a Prometheus text-exposition body and
 // returns the *summed* value for each requested metric name. Labels are
 // collapsed (sum across all label sets) so the agent gets one number per
 // metric, which is what we want for "did spans flow?".
-func ParsePromCountersForNames(body string, wanted []string) map[string]float64 {
+func parsePromCountersForNames(body string, wanted []string) map[string]float64 {
 	wantedSet := make(map[string]struct{}, len(wanted))
 	for _, name := range wanted {
 		wantedSet[name] = struct{}{}

@@ -18,7 +18,7 @@ otelcol_exporter_sent_spans{exporter="otlp/destA"} 50
 otelcol_exporter_sent_spans{exporter="otlp/destB"} 200
 otelcol_uninteresting_metric{x="y"} 999
 `
-	got := ParsePromCountersForNames(body, []string{
+	got := parsePromCountersForNames(body, []string{
 		"otelcol_receiver_accepted_spans",
 		"otelcol_exporter_sent_spans",
 	})
@@ -35,7 +35,7 @@ otelcol_uninteresting_metric{x="y"} 999
 
 func TestParsePromCountersHandlesNoLabels(t *testing.T) {
 	body := "otelcol_processor_dropped_spans 7\n"
-	got := ParsePromCountersForNames(body, []string{"otelcol_processor_dropped_spans"})
+	got := parsePromCountersForNames(body, []string{"otelcol_processor_dropped_spans"})
 	if got["otelcol_processor_dropped_spans"] != 7 {
 		t.Errorf("dropped_spans: got %v want 7", got["otelcol_processor_dropped_spans"])
 	}
@@ -43,7 +43,7 @@ func TestParsePromCountersHandlesNoLabels(t *testing.T) {
 
 func TestParsePromCountersHandlesEmptyLabelSet(t *testing.T) {
 	body := "otelcol_exporter_sent_spans{} 42\n"
-	got := ParsePromCountersForNames(body, []string{"otelcol_exporter_sent_spans"})
+	got := parsePromCountersForNames(body, []string{"otelcol_exporter_sent_spans"})
 	if got["otelcol_exporter_sent_spans"] != 42 {
 		t.Errorf("empty label set: got %v want 42", got["otelcol_exporter_sent_spans"])
 	}
@@ -58,7 +58,7 @@ func TestParsePromLineSkipsMalformed(t *testing.T) {
 		"name{a=\"b\"} not_a_number",
 	}
 	for _, line := range cases {
-		got := ParsePromCountersForNames(line+"\n", []string{"name"})
+		got := parsePromCountersForNames(line+"\n", []string{"name"})
 		if len(got) != 0 {
 			t.Errorf("input %q should yield no metrics, got %v", line, got)
 		}
