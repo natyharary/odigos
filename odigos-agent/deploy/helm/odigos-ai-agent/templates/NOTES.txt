@@ -27,4 +27,4 @@ Drive a debug run:
       http://{{ include "odigos-ai-agent.fullname" . }}:{{ .Values.service.port }}/debug
 
 The frontend Go backend reaches this service via AI_AGENT_URL and
-authenticates with the same bearer token (Phase 5).
+authenticates with the same bearer token.

@@ -1,10 +1,9 @@
 # Default values for odigos-ai-agent.
 #
-# This chart is intentionally self-contained (not yet a subchart of the main
-# odigos chart) so the agent can be iterated on independently while Phase 4
-# stabilizes. Once the agent ships as a first-class odigos component the
-# defaults here should be folded into helm/odigos/values.yaml and the
-# templates relocated under helm/odigos/templates/ai-agent/.
+# Self-contained chart so the agent can be iterated on independently.
+# Once it ships as a first-class odigos component the defaults here
+# should fold into helm/odigos/values.yaml and the templates relocate
+# under helm/odigos/templates/ai-agent/.
 
 # -- Global image pull secrets applied to all three containers in the pod.
 # Use the same secret names you already configure for the main odigos chart.
