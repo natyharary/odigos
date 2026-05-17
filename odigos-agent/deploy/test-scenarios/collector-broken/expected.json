@@ -1,0 +1,10 @@
+{
+  "scenario": "collector-broken",
+  "workload": {
+    "namespace": "odigos-agent-test",
+    "kind": "Deployment",
+    "name": "demo"
+  },
+  "expected_root_cause": "collector_misconfigured",
+  "expects_proposed_remediation": false
+}

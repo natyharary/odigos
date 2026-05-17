@@ -1,0 +1,102 @@
+# Scenario: instrumented workload + valid destination + Processor with
+# invalid config that the gateway can't load.
+#
+# odigos's autoscaler renders the Processor into the gateway ConfigMap;
+# the gateway pod then either crash-loops or refuses to load the new
+# config. The collector subgraph should pick this up via
+# `list_collector_pods(CLUSTER_GATEWAY)` (restart count, ready=false)
+# and `get_collector_logs(CLUSTER_GATEWAY)` (config parse errors).
+#
+# `debug` is the cheapest built-in destination type and stays healthy on
+# its own, so it doesn't contaminate the diagnosis.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: odigos-agent-test
+  labels:
+    app: demo
+    odigos.io/agent-test: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+        - name: demo
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do sleep 30; done"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+---
+apiVersion: odigos.io/v1alpha1
+kind: Source
+metadata:
+  name: demo
+  namespace: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+spec:
+  workload:
+    name: demo
+    namespace: odigos-agent-test
+    kind: Deployment
+  otelServiceName: demo
+---
+apiVersion: odigos.io/v1alpha1
+kind: Destination
+metadata:
+  name: agent-test-debug
+  namespace: odigos-system
+  labels:
+    odigos.io/agent-test: "true"
+spec:
+  destinationName: agent-test-debug
+  type: debug
+  signals:
+    - TRACES
+    - METRICS
+    - LOGS
+  data:
+    VERBOSITY: basic
+---
+apiVersion: odigos.io/v1alpha1
+kind: Processor
+metadata:
+  name: agent-test-bad-batch
+  namespace: odigos-system
+  labels:
+    odigos.io/agent-test: "true"
+spec:
+  type: batch
+  # Invalid config: send_batch_max_size must be >= send_batch_size; this
+  # inversion is rejected by the batch processor at load time, breaking
+  # the gateway pipeline.
+  processorConfig:
+    send_batch_size: 512
+    send_batch_max_size: 1
+  orderHint: 50
+  signals:
+    - TRACES
+    - METRICS
+    - LOGS
+  collectorRoles:
+    - CLUSTER_GATEWAY

@@ -1,0 +1,10 @@
+{
+  "scenario": "destination-broken",
+  "workload": {
+    "namespace": "odigos-agent-test",
+    "kind": "Deployment",
+    "name": "demo"
+  },
+  "expected_root_cause": "destination_misconfigured",
+  "expects_proposed_remediation": false
+}

@@ -1,0 +1,43 @@
+# Scenario: workload exists, NO Source CR.
+#
+# Only the namespace and the workload Deployment. odigos will leave the
+# pod untouched - no InstrumentationConfig, no InstrumentationInstance,
+# no device injection. This is the exact shape that should trigger the
+# source subgraph and a `propose_create_source` proposal.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: odigos-agent-test
+  labels:
+    odigos.io/agent-test: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: odigos-agent-test
+  labels:
+    app: demo
+    odigos.io/agent-test: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+        - name: demo
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do sleep 30; done"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
