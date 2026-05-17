@@ -6,16 +6,12 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
 
 import networkx as nx
 from mcp.server.fastmcp import FastMCP
 
 from .loader import GraphArtifact, read_wiki_file
 
-# Caps. These match the agent-side per-session budget in the plan (max 30
-# graph/wiki queries per /debug request).
 DEFAULT_TOP_K = 20
 MAX_TOP_K = 100
 MAX_NEIGHBORS = 200
@@ -61,7 +57,7 @@ def register(server: FastMCP, artifact: GraphArtifact) -> None:
         """
         if not query:
             return {"query": query, "matches": [], "total": 0}
-        top_k = _clamp(top_k, 1, MAX_TOP_K)
+        top_k = max(1, min(top_k, MAX_TOP_K))
         query_lower = query.lower()
         scored: list[tuple[int, int, str, dict]] = []
         for node_id, attributes in artifact.graph.nodes(data=True):
@@ -90,7 +86,7 @@ def register(server: FastMCP, artifact: GraphArtifact) -> None:
         """
         if node_id not in artifact.graph:
             return {"found": False, "node_id": node_id}
-        depth = _clamp(depth, 1, 2)
+        depth = max(1, min(depth, 2))
         visited: dict[str, int] = {node_id: 0}
         queue: deque[str] = deque([node_id])
         edges_seen: list[dict] = []
@@ -139,7 +135,7 @@ def register(server: FastMCP, artifact: GraphArtifact) -> None:
         If no path exists within max_hops, `found` is false. Paths are
         returned as the ordered node-id sequence plus the edges traversed.
         """
-        max_hops = _clamp(max_hops, 1, MAX_PATH_HOPS)
+        max_hops = max(1, min(max_hops, MAX_PATH_HOPS))
         if from_id not in artifact.graph or to_id not in artifact.graph:
             return {"found": False, "from": from_id, "to": to_id, "reason": "node not found"}
         try:
@@ -186,7 +182,7 @@ def register(server: FastMCP, artifact: GraphArtifact) -> None:
         community_id = _resolve_community(community_id_or_name, artifact)
         if community_id is None:
             return {"found": False, "input": community_id_or_name}
-        top_nodes = _clamp(top_nodes, 1, MAX_COMMUNITY_TOP_NODES)
+        top_nodes = max(1, min(top_nodes, MAX_COMMUNITY_TOP_NODES))
         nodes = _nodes_for_community(community_id, artifact)
         nodes_sorted = sorted(nodes, key=lambda item: artifact.graph.degree(item[0]), reverse=True)
         top = [
@@ -211,7 +207,7 @@ def register(server: FastMCP, artifact: GraphArtifact) -> None:
         `scope` accepts a community id or name; when set, results are
         restricted to nodes in that community.
         """
-        top_k = _clamp(top_k, 1, MAX_TOP_K)
+        top_k = max(1, min(top_k, MAX_TOP_K))
         scope_community_id: int | None = None
         if scope:
             scope_community_id = _resolve_community(scope, artifact)
@@ -268,7 +264,7 @@ def register(server: FastMCP, artifact: GraphArtifact) -> None:
         Truncates to max_lines and reports `truncated`. Returns `found=False`
         when no page matches.
         """
-        max_lines = _clamp(max_lines, 1, MAX_WIKI_MAX_LINES)
+        max_lines = max(1, min(max_lines, MAX_WIKI_MAX_LINES))
         community_id = _resolve_community(community_name, artifact)
         if community_id is None:
             return {"found": False, "input": community_name}
@@ -288,14 +284,6 @@ def register(server: FastMCP, artifact: GraphArtifact) -> None:
 
 
 # ---- helpers ----
-
-
-def _clamp(value: int, low: int, high: int) -> int:
-    if value < low:
-        return low
-    if value > high:
-        return high
-    return value
 
 
 def _label_match_score(label: str, norm: str, query_lower: str) -> int:
@@ -402,20 +390,3 @@ def _candidate_wiki_filenames(name: str, community_id: int) -> list[str]:
     ]
 
 
-# Exposed for tests: a wrapper around the module-level helper above.
-def candidate_wiki_filenames(name: str, community_id: int) -> list[str]:
-    return _candidate_wiki_filenames(name, community_id)
-
-
-def label_match_score(label: str, norm: str, query_lower: str) -> int:
-    return _label_match_score(label, norm, query_lower)
-
-
-def resolve_community(input_value: str, artifact: GraphArtifact) -> int | None:
-    return _resolve_community(input_value, artifact)
-
-
-# Avoid linter complaints about Path being unused on systems that strip
-# type-only imports.
-_ = Path
-_ = Any

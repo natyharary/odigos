@@ -14,9 +14,9 @@ import pytest
 
 from graph_mcp.loader import GraphArtifact
 from graph_mcp.tools import (
-    candidate_wiki_filenames,
-    label_match_score,
-    resolve_community,
+    _candidate_wiki_filenames as candidate_wiki_filenames,
+    _label_match_score as label_match_score,
+    _resolve_community as resolve_community,
 )
 
 

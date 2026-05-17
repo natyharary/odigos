@@ -22,7 +22,10 @@ const (
 	citationFetchTimeout  = 10 * time.Second
 	citationCacheTTL      = 30 * time.Minute
 	citationCacheMaxBytes = 20 * 1024 * 1024
-	rawGithubBase         = "https://raw.githubusercontent.com/odigos-io/odigos"
+	// Single-file fetch cap. Quarter of the total cache so one large file
+	// can't dominate the LRU.
+	maxFetchFileBytes = citationCacheMaxBytes / 4
+	rawGithubBase     = "https://raw.githubusercontent.com/odigos-io/odigos"
 )
 
 // RegisterCitationTools wires the gh_read_file MCP tool onto the server.
@@ -139,13 +142,12 @@ func (m *citationManager) fetch(ctx context.Context, url string) (string, error)
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("upstream status %d", response.StatusCode)
 	}
-	limit := int64(citationCacheMaxBytes / 4)
-	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, int64(maxFetchFileBytes)+1))
 	if err != nil {
 		return "", err
 	}
-	if int64(len(bodyBytes)) > limit {
-		return "", fmt.Errorf("file too large: > %d bytes", limit)
+	if len(bodyBytes) > maxFetchFileBytes {
+		return "", fmt.Errorf("file too large: > %d bytes", maxFetchFileBytes)
 	}
 	return string(bodyBytes), nil
 }
