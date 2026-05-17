@@ -2122,17 +2122,17 @@
           "description": "Wiring for the in-cluster odigos-ai-agent (\"Fix with AI\"). The agent ships from the separate `odigos-ai-agent` chart; this block points the UI backend at it. Leave unset to disable the feature in the UI.",
           "properties": {
             "url": {
-              "default": "http://odigos-ai-agent:8765",
+              "default": "http://odigos-ai-agent.odigos-system:8765",
               "description": "HTTP base URL of the agent Service (no trailing slash).",
               "title": "url",
               "type": "string"
             },
             "tokenSecret": {
               "additionalProperties": false,
-              "description": "Reference to the Secret holding the bearer token. Defaults to the secret the odigos-ai-agent chart creates.",
+              "description": "Reference to the Secret holding the bearer token. Defaults to the secret the odigos-ai-agent chart creates when installed with release name 'odigos-ai-agent'.",
               "properties": {
                 "name": {
-                  "default": "odigos-ai-agent-agent-token",
+                  "default": "odigos-ai-agent-token",
                   "description": "Name of the Secret.",
                   "title": "name",
                   "type": "string"

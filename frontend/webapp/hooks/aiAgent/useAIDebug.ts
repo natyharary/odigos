@@ -67,6 +67,8 @@ function reducer(state: DebugState, action: Action): DebugState {
           };
         case 'report':
           return { ...state, report: event.data, steps: stepsAppend };
+        case 'done':
+          return state.status === 'error' ? state : { ...state, status: 'done', steps: stepsAppend };
         case 'error':
           return {
             ...state,

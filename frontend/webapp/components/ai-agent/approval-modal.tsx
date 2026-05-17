@@ -121,6 +121,7 @@ function formatCountdown(seconds: number): string {
 
 const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
   const [submitting, setSubmitting] = useState<ApprovalDecision | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -133,11 +134,16 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
     return Math.max(0, APPROVAL_TIMEOUT_SECONDS - elapsed);
   }, [now, receivedAt]);
 
+  const expired = remaining <= 0;
+
   const handle = async (decision: ApprovalDecision) => {
-    if (submitting) return;
+    if (submitting || expired) return;
     setSubmitting(decision);
+    setSubmitError(null);
     try {
       await onDecide(decision);
+    } catch (error) {
+      setSubmitError((error as Error)?.message || 'failed to send decision');
     } finally {
       setSubmitting(null);
     }
@@ -181,14 +187,22 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
           </div>
         )}
 
+        {submitError && (
+          <Subtitle style={{ color: '#f0a0a0' }}>
+            Decision failed: {submitError}
+          </Subtitle>
+        )}
+
         <ButtonRow>
-          <Subtitle>Auto-deny in {formatCountdown(remaining)}</Subtitle>
+          <Subtitle>
+            {expired ? 'Approval window expired - the agent will time out' : `Expires in ${formatCountdown(remaining)}`}
+          </Subtitle>
           <div style={{ display: 'flex', gap: 8 }}>
             <Action
               $variant="deny"
               type="button"
               onClick={() => handle('deny')}
-              disabled={submitting !== null}
+              disabled={submitting !== null || expired}
             >
               {submitting === 'deny' ? 'Denying…' : 'Deny'}
             </Action>
@@ -196,7 +210,7 @@ const ApprovalModal: React.FC<Props> = ({ approval, receivedAt, onDecide }) => {
               $variant="approve"
               type="button"
               onClick={() => handle('approve')}
-              disabled={submitting !== null}
+              disabled={submitting !== null || expired}
             >
               {submitting === 'approve' ? 'Approving…' : 'Approve & apply'}
             </Action>

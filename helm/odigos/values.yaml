@@ -706,9 +706,9 @@ ui:
   #    - aiAgent.tokenSecret.key: key inside that Secret (default ODIGOS_AGENT_TOKEN).
   # @schema
   aiAgent:
-    url: "http://odigos-ai-agent:8765"
+    url: "http://odigos-ai-agent.odigos-system:8765"
     tokenSecret:
-      name: "odigos-ai-agent-agent-token"
+      name: "odigos-ai-agent-token"
       key: "ODIGOS_AGENT_TOKEN"
 
   # @schema

@@ -45,6 +45,7 @@ const FixWithAIButton: React.FC = () => {
   const open = useAIAgentPanelStore((s) => s.open);
 
   if (drawerType !== EntityTypes.Source || !drawerEntityId) return null;
+  if (typeof drawerEntityId !== 'object') return null;
   const workload = drawerEntityId as WorkloadId;
   if (!workload.namespace || !workload.name || !workload.kind) return null;
 
