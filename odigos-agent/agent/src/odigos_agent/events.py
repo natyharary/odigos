@@ -1,11 +1,9 @@
-"""SSE event schema for the Phase 3 streaming API.
+"""SSE event schema for the streaming /debug API.
 
-Each event is a small dataclass with an `event` name and a JSON-serializable
-`data` payload. `to_sse_bytes()` returns the wire format that the
-sse-starlette `EventSourceResponse` consumes.
-
-Factory helpers exist for each event name documented in PLAN.md so the API
-layer doesn't have to remember the exact key names.
+Each event is a small dataclass with an `event` name and a JSON-
+serializable `data` payload. `to_sse_dict()` returns the shape sse-
+starlette's EventSourceResponse expects; `to_sse_bytes()` returns the
+raw wire format (used by tests).
 """
 
 from __future__ import annotations

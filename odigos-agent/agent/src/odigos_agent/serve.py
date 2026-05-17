@@ -1,7 +1,7 @@
-"""uvicorn entrypoint for the Phase 3 API.
+"""uvicorn entrypoint for the agent HTTP API.
 
-Binds 0.0.0.0:8765 by default so the in-cluster Service can reach the pod.
-Override the port with PORT and the log level with LOG_LEVEL.
+Binds 0.0.0.0:8765 by default so the in-cluster Service can reach the
+pod. Override the port with PORT and the log level with LOG_LEVEL.
 """
 
 from __future__ import annotations
