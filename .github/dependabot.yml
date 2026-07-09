@@ -3,6 +3,8 @@ updates:
   # Maintain dependencies for GitHub Actions
   - package-ecosystem: 'github-actions'
     directory: /
+    exclude-paths:
+      - tests/**
     schedule:
       day: sunday
       interval: weekly
@@ -23,6 +25,8 @@ updates:
       - /procdiscovery
       - /profiles
       - /scheduler
+    exclude-paths:
+      - tests/**
     schedule:
       day: sunday
       interval: weekly
@@ -44,6 +48,8 @@ updates:
     directories:
       - /docs
       - /agents/python
+    exclude-paths:
+      - tests/**
     schedule:
       day: sunday
       interval: weekly
@@ -53,6 +59,8 @@ updates:
       - /frontend/webapp
       - /docs
       - /agents/nodejs-native-community
+    exclude-paths:
+      - tests/**
     schedule:
       day: sunday
       interval: weekly
@@ -71,6 +79,8 @@ updates:
       - /frontend
       - /odiglet
       - /operator
+    exclude-paths:
+      - tests/**
     schedule:
       day: sunday
       interval: weekly
